@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from domain.exceptions import BusinessRuleViolation
 
 # ============================================================
 # UTILITÁRIOS
@@ -244,7 +244,7 @@ def consultar_localizacoes_ciclo(
     }
 
     if ordenar_por not in ordenacoes_validas:
-        raise ValueError(
+        raise BusinessRuleViolation(
             "ordenar_por deve ser PRIORIDADE, RISCO, "
             "ULTIMA_CONTAGEM ou LOCALIZACAO."
         )

@@ -1,0 +1,421 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260902_113503.log
+[FAIL] Regressão acumulada base (regressao_completa.py) - 234.30s
+       RESULTADO GERAL: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+====================================================================
+SGI - SUÍTE E2E AUTOMÁTICA DO INVENTÁRIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+====================================================================
+[PASS] Autenticação
+[PASS] Snapshot não pode ser gerado duas vezes
+[PASS] R1 sem divergência + finalização idempotente
+[PASS] Proteções + RECONTAR sem justificativa + R2 resolvida
+[PASS] JUSTIFICAR exige texto + encerra na R1 sem R2
+[PASS] R2 persistente finaliza como divergência confirmada
+
+====================================================================
+PASS: 6 | FAIL: 0
+RESULTADO: APROVADO
+====================================================================
+========================================================================
+SGI - ESTÁGIO 2 | PROTEÇÕES E INTEGRIDADE DO INVENTÁRIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] Decisão duplicada para a mesma divergência
+[PASS] Troca RECONTAR -> JUSTIFICAR
+[PASS] Troca JUSTIFICAR -> RECONTAR
+[PASS] Duplo POST de criação da R2
+[PASS] Item não autorizado não pode ser contado na R2
+[PASS] Operação após inventário finalizado
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 3 | ESTADOS LIMITE E CONSISTÊNCIA DO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] Snapshot ausente bloqueia consolidação
+[PASS] Reabertura substitui sessão anterior na consolidação
+[PASS] Finalização repetida não duplica resultado
+[PASS] Sessão encerrada não aceita nova contagem
+[PASS] R2 persistente finaliza sem criar R3
+
+========================================================================
+PASS: 6 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 4 | CONCORRÊNCIA LÓGICA E INTEGRIDADE OPERACIONAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] Duplo início reutiliza a sessão aberta
+[PASS] Rodada antiga fica bloqueada após criação da R2
+[PASS] Reabertura repetida mantém somente a última sessão válida
+[PASS] Não permite decisão para item sem divergência
+[PASS] Não permite decisão após rodada/inventário finalizado
+[PASS] Resultado final não possui duplicidade lógica
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 5 | CLASSIFICAÇÃO DAS DIVERGÊNCIAS ROTATIVAS
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] Sobra de quantidade = QUANTIDADE
+[PASS] Falta de item = FALTA / QUANTIDADE
+[PASS] Item inexistente no snapshot = ITEM_NAO_PREVISTO
+[FAIL] Troca de lote com total correto = LOTE_INCORRETO: O endereço de teste não possui um código com pelo menos dois lotes positivos; não é possível validar LOTE_INCORRETO de forma determinística.
+[FAIL] Troca de lote com total incorreto = LOTE_E_QUANTIDADE: O endereço de teste não possui um código com pelo menos dois lotes positivos; não é possível validar LOTE_INCORRETO de forma determinística.
+[PASS] Resumo contabiliza divergência de quantidade
+
+========================================================================
+PASS: 5 | FAIL: 2
+RESULTADO: REPROVADO
+ - Troca de lote com total correto = LOTE_INCORRETO: O endereço de teste não possui um código com pelo menos dois lotes positivos; não é possível validar LOTE_INCORRETO de forma determinística.
+ - Troca de lote com total incorreto = LOTE_E_QUANTIDADE: O endereço de teste não possui um código com pelo menos dois lotes positivos; não é possível validar LOTE_INCORRETO de forma determinística.
+========================================================================
+SGI - ESTÁGIO 6 | ISOLAMENTO ENTRE LOCALIZAÇÕES
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007
+========================================================================
+[PASS] Autenticação
+[PASS] Divergência não contamina outra localização
+[PASS] R2 contém somente a localização decidida
+[PASS] Decisão com localização incorreta é bloqueada
+[PASS] Duas localizações corretas finalizam sem R2
+[PASS] Resultado final preserva as duas localizações
+
+========================================================================
+PASS: 6 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 7 | DECISÕES, OCORRÊNCIAS E RASTREABILIDADE
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] RECONTAR cria decisão e ocorrência vinculadas
+[PASS] R2 resolvida fecha corretamente a ocorrência
+[PASS] R2 persistente confirma a divergência
+[PASS] JUSTIFICAR não cria R2 e preserva divergência final
+[PASS] Substituição de decisão não duplica candidato da R2
+[PASS] Troca RECONTAR -> JUSTIFICAR remove candidato da R2
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 8 | RESULTADO FINAL E CONSISTÊNCIA GERENCIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+[PASS] R1 sem divergência gera resultado final consistente
+[PASS] R2 resolvida usa a quantidade correta da R2
+[PASS] R2 persistente preserva a divergência final
+[PASS] JUSTIFICAR preserva quantidade e divergência da R1
+[PASS] Resultado final não possui duplicidade lógica
+[PASS] Resultado final permanece idempotente
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 9 | COBERTURA E CICLO DO INVENTÁRIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007
+========================================================================
+[PASS] Autenticação
+[PASS] Ciclo aberto/criado e abertura idempotente
+[PASS] Consulta e cobertura inicial são coerentes
+[PASS] Localização pendente entra em EM_CONTAGEM
+[PASS] Conclusão operacional atualiza cobertura
+[PASS] Conclusão repetida não duplica cobertura
+[PASS] Vínculo inventário/rodada e última contagem são preservados
+[PASS] Filtros operacionais respeitam o status do ciclo
+
+========================================================================
+PASS: 8 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 10 | REGRESSÃO DO INVENTÁRIO OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Localização: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+
+========================================================================
+1. CRIANDO INVENTÁRIO OFICIAL
+========================================================================
+Inventário: 1185
+Código: E2E-OF10-8359894355
+
+========================================================================
+2. ESCOPO + SNAPSHOT
+========================================================================
+Escopo: {'sucesso': True, 'id_inventario': 1185, 'codigo_inventario': 'E2E-OF10-8359894355', 'localizacoes_recebidas': 1, 'adicionadas': ['01PLAQUETA'], 'reativadas': [], 'ja_existentes': [], 'mensagem': 'Escopo do inventário atualizado com sucesso.'}
+Registros snapshot: 2
+Item usado para divergência: ('71554091', '3007863031 - 40') | estoque: 2.0
+
+========================================================================
+3. R1 COMPLETA - GERANDO 1 DIVERGÊNCIA
+========================================================================
+Resumo R1: {'total_registros': 2, 'ok': 1, 'divergencias': 1, 'faltas': 0, 'sobras': 0}
+Divergências R1: 1
+
+========================================================================
+4. GERANDO R2
+========================================================================
+Preview R2: {'id_inventario': 1185, 'codigo_inventario': 'E2E-OF10-8359894355', 'tipo_inventario': 'OFICIAL', 'status_inventario': 'ABERTO', 'preview': {'pode_criar': True, 'motivo': None, 'id_inventario': 1185, 'numero_rodada_atual': 1, 'numero_proxima_rodada': 2, 'tipo_proxima_rodada': 'COMPLETA', 'origem_candidatos': 'ESCOPO_COMPLETO', 'candidatos': 0, 'pode_encaminhar_gestor': False, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'itens_candidatos': []}}
+
+========================================================================
+5. R2 COMPLETA - REPETINDO A MESMA DIVERGÊNCIA
+========================================================================
+Resumo R2: {'total_registros': 2, 'ok': 1, 'divergencias': 1, 'faltas': 0, 'sobras': 0}
+
+========================================================================
+6. GERANDO R3 DE DIVERGÊNCIAS
+========================================================================
+Preview R3: {'id_inventario': 1185, 'codigo_inventario': 'E2E-OF10-8359894355', 'tipo_inventario': 'OFICIAL', 'status_inventario': 'ABERTO', 'preview': {'pode_criar': True, 'motivo': None, 'id_inventario': 1185, 'numero_rodada_atual': 2, 'numero_proxima_rodada': 3, 'tipo_proxima_rodada': 'DIVERGENCIAS', 'origem_candidatos': 'DIVERGENCIAS_R1_R2', 'candidatos': 1, 'pode_encaminhar_gestor': False, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'itens_candidatos': [{'codigo': '71554091', 'lote': '3007863031 - 40', 'motivo': 'DIVERGENCIA_R1_R2'}]}}
+R3: {'criada': True, 'id_rodada': 1571, 'numero_rodada': 3, 'status': 'ABERTA', 'data_hora_inicio': '2026-09-02T11:38:17.880000', 'tipo_rodada': 'DIVERGENCIAS', 'rodada_origem': 2, 'rodada_anterior_finalizada': True, 'origem_candidatos': 'DIVERGENCIAS_R1_R2', 'itens_gerados': 1, 'localizacoes_geradas': 1, 'localizacoes': ['01PLAQUETA'], 'candidatos': 1, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'recontagem_por_localizacao': True, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'pode_encaminhar_gestor': False}
+
+========================================================================
+7. R3 - RECONTANDO CORRETAMENTE
+========================================================================
+Localizações R3: ['01PLAQUETA']
+Resumo R3: {'total_itens': 1, 'itens_originais_recontagem': 1, 'itens_novos_encontrados': 0, 'ok': 1, 'divergencias': 0, 'faltas': 0, 'sobras': 0, 'aguardando_contagem': 0, 'pendentes_proxima_rodada': 0, 'total_localizacoes': 1, 'localizacoes_concluidas': 1, 'localizacoes_pendentes': 0}
+Status R3: CONCILIADA
+
+========================================================================
+8. VALIDANDO ANÁLISE GERENCIAL
+========================================================================
+Resumo gestor: {'total_itens': 2, 'ok': 2, 'divergencias': 0, 'faltas': 0, 'sobras': 0, 'sem_contagem': 0, 'itens_para_decisao_gestor': 0, 'itens_sem_decisao': 0, 'aceitaram_estoque': 0, 'aceitaram_contagem': 0, 'nova_recontagem': 0, 'itens_resolvidos_gestor': 0, 'itens_resolvidos_total': 2, 'rodadas_nao_finalizadas': 1}
+Pode finalizar: True
+
+========================================================================
+9. FINALIZANDO INVENTÁRIO OFICIAL
+========================================================================
+Finalização: {'sucesso': True, 'id_inventario': 1185, 'codigo_inventario': 'E2E-OF10-8359894355', 'status': 'FINALIZADO', 'finalizado_por': 'admin', 'rodada_final': 3, 'resumo_final': {'total_itens': 2, 'ok': 2, 'faltas': 0, 'sobras': 0, 'divergencias': 0}, 'itens': [{'codigo': '71256360', 'lote': '3007849339 - 220', 'qtd_estoque': 1.0, 'quantidade_final': 1.0, 'diferenca_final': 0.0, 'status_final': 'OK', 'origem_quantidade': 'CONTAGEM_CONCILIADA', 'id_decisao_gestor': None, 'rodada_final': 2}, {'codigo': '71554091', 'lote': '3007863031 - 40', 'qtd_estoque': 2.0, 'quantidade_final': 2.0, 'diferenca_final': 0.0, 'status_final': 'OK', 'origem_quantidade': 'CONTAGEM_CONCILIADA', 'id_decisao_gestor': None, 'rodada_final': 3}], 'mensagem': 'Resultado final consolidado e inventário finalizado com sucesso.'}
+
+========================================================================
+10. VALIDANDO RESULTADO FINAL
+========================================================================
+Status resultado final: FINALIZADO
+
+========================================================================
+REGRESSÃO OFICIAL CONCLUÍDA COM SUCESSO
+========================================================================
+Inventário testado: 1185
+R1: 1569
+R2: 1570
+R3: 1571
+[PASS] Fluxo OFICIAL R1 + R2 + R3 + finalização
+
+========================================================================
+PASS: 2 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+========================================================================
+SGI - ESTÁGIO 12 | COEXISTÊNCIA ROTATIVO + OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armazém: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autenticação
+
+========================================================================
+1. CRIANDO ROTATIVO E OFICIAL SIMULTANEAMENTE
+========================================================================
+ROTATIVO: inventário 1186, R1 1572
+OFICIAL:  inventário 1187, R1 1573
+
+========================================================================
+2. ESCOPO + SNAPSHOT INDEPENDENTES
+========================================================================
+Snapshot ROTATIVO: 2
+Snapshot OFICIAL:  2
+
+========================================================================
+3. ROTATIVO - DIVERGÊNCIA + JUSTIFICATIVA
+========================================================================
+
+========================================================================
+4. CONFIRMANDO QUE O OFICIAL CONTINUA INDEPENDENTE
+========================================================================
+ROTATIVO finalizado; OFICIAL segue operacional.
+
+========================================================================
+5. OFICIAL R1 - CRIANDO DIVERGÊNCIA
+========================================================================
+
+========================================================================
+6. OFICIAL R2 - MESMA DIVERGÊNCIA
+========================================================================
+
+========================================================================
+7. OFICIAL R3 - SOMENTE DIVERGÊNCIAS
+========================================================================
+
+========================================================================
+8. GESTOR + FINALIZAÇÃO OFICIAL
+========================================================================
+
+========================================================================
+9. VALIDAÇÕES FINAIS DE ISOLAMENTO
+========================================================================
+ROTATIVO finalizado: 1186
+OFICIAL finalizado:  1187
+Resultados finais permaneceram independentes.
+[PASS] ROTATIVO e OFICIAL coexistem sem contaminação de estado
+
+========================================================================
+PASS: 2 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+==============================================================================
+SGI - REGRESS�O COMPLETA DO INVENT�RIO
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Pasta:  C:\Users\rai.sousa\Desktop\SGI\tests_e2e
+Timeout por teste: 600s
+Sa�da completa: SIM
+==============================================================================
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Fluxo E2E
+ARQUIVO:   teste_rotativo_e2e_v2.py
+==============================================================================
+
+[APROVADO] ROTATIVO - Fluxo E2E (17.8s)
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Prote��es
+ARQUIVO:   teste_rotativo_protecoes_corrigido.py
+==============================================================================
+
+[APROVADO] ROTATIVO - Prote��es (24.5s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 3 - Estados limite e consist�ncia
+ARQUIVO:   teste_rotativo_estagio3.py
+==============================================================================
+
+[APROVADO] EST�GIO 3 - Estados limite e consist�ncia (17.1s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 4
+ARQUIVO:   teste_rotativo_estagio4.py
+==============================================================================
+
+[APROVADO] EST�GIO 4 (24.9s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 5
+ARQUIVO:   teste_rotativo_estagio5.py
+==============================================================================
+
+[REPROVADO] EST�GIO 5 (12.1s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 6
+ARQUIVO:   teste_rotativo_estagio6_corrigido.py
+==============================================================================
+
+[APROVADO] EST�GIO 6 (27.0s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 7
+ARQUIVO:   teste_rotativo_estagio7.py
+==============================================================================
+
+[APROVADO] EST�GIO 7 (23.4s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 8
+ARQUIVO:   teste_rotativo_estagio8.py
+==============================================================================
+
+[APROVADO] EST�GIO 8 (23.0s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 9
+ARQUIVO:   teste_rotativo_estagio9.py
+==============================================================================
+
+[APROVADO] EST�GIO 9 (20.5s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 10 - Regress�o OFICIAL
+ARQUIVO:   teste_oficial_estagio10.py
+==============================================================================
+
+[APROVADO] EST�GIO 10 - Regress�o OFICIAL (10.9s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL
+ARQUIVO:   teste_estagio12_coexistencia.py
+==============================================================================
+
+[APROVADO] EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL (33.0s)
+
+==============================================================================
+SGI - RESUMO DA REGRESS�O COMPLETA
+==============================================================================
+TESTE                                         STATUS           TEMPO  ARQUIVO
+--------------------------------------------------------------------------------------------------------------
+ROTATIVO - Fluxo E2E                          APROVADO         17.8s  teste_rotativo_e2e_v2.py
+ROTATIVO - Prote��es                          APROVADO         24.5s  teste_rotativo_protecoes_corrigido.py
+EST�GIO 3 - Estados limite e consist�ncia     APROVADO         17.1s  teste_rotativo_estagio3.py
+EST�GIO 4                                     APROVADO         24.9s  teste_rotativo_estagio4.py
+EST�GIO 5                                     REPROVADO        12.1s  teste_rotativo_estagio5.py
+EST�GIO 6                                     APROVADO         27.0s  teste_rotativo_estagio6_corrigido.py
+EST�GIO 7                                     APROVADO         23.4s  teste_rotativo_estagio7.py
+EST�GIO 8                                     APROVADO         23.0s  teste_rotativo_estagio8.py
+EST�GIO 9                                     APROVADO         20.5s  teste_rotativo_estagio9.py
+EST�GIO 10 - Regress�o OFICIAL                APROVADO         10.9s  teste_oficial_estagio10.py
+EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL  APROVADO         33.0s  teste_estagio12_coexistencia.py
+
+TOTAL PREVISTO: 11
+EXECUTADOS:     11
+APROVADOS:      10
+REPROVADOS:     1
+AUSENTES:       0
+TEMPO TOTAL:    3m 54.1s
+
+RESULTADO GERAL: REPROVADO
+
+FALHAS:
+ - EST�GIO 5: C�digo de sa�da: 1
+==============================================================================
+------- FIM DA SAÍDA -------
+
+[PASS] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 8.74s
+       RESULTADO: APROVADO
+[PASS] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 5.32s
+       RESULTADO: APROVADO
+[PASS] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 14.85s
+       RESULTADO: APROVADO
+[PASS] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 3.96s
+       RESULTADO: APROVADO
+[PASS] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 10.07s
+       RESULTADO: APROVADO
+RESUMO FINAL
+FALHOU | Regressão acumulada base                   |  234.30s
+OK     | OFICIAL - Guard de regressão               |    8.74s
+OK     | Estágio 13 - Integridade transacional      |    5.32s
+OK     | Estágio 14 - Concorrência real             |   14.85s
+OK     | Estágio 15 - Segurança e RBAC              |    3.96s
+OK     | Estágio 16 - Performance e readiness       |   10.07s
+PASS: 5 | FAIL: 1 | SKIP: 0 | DURAÇÃO TOTAL: 277.48s
+RESULTADO FINAL: REPROVADO
+O núcleo não deve avançar para homologação até a(s) falha(s) serem classificadas e corrigidas.

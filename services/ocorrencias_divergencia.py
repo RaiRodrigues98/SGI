@@ -1,5 +1,5 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
-from fastapi import HTTPException
+
 
 
 # ============================================================

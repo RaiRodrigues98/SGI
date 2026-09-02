@@ -6,7 +6,6 @@ from datetime import (
 
 import os
 
-from fastapi import HTTPException
 from domain.exceptions import AuthenticationError, AuthorizationError
 from jose import (
     JWTError,

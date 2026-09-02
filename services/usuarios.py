@@ -1,5 +1,10 @@
-from fastapi import HTTPException
-from domain.exceptions import BusinessRuleViolation, ConflictError, NotFoundError
+from domain.exceptions import (
+    BusinessRuleViolation,
+    ConflictError,
+    NotFoundError,
+)
+
+from application.exceptions import ApplicationError
 
 from services.seguranca import (
     gerar_hash_senha,
@@ -107,19 +112,19 @@ def criar_usuario(
 
     if not nome:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Nome obrigatório."
         )
 
     if not login:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Login obrigatório."
         )
 
     if not senha:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Senha obrigatória."
         )
 
@@ -146,7 +151,7 @@ def criar_usuario(
 
     if cursor.fetchone():
 
-                raise ConflictError(
+        raise ConflictError(
             "Já existe um usuário com este login."
         )
 
@@ -177,7 +182,7 @@ def criar_usuario(
 
         if cursor.fetchone():
 
-                        raise ConflictError(
+            raise ConflictError(
                 "Já existe um usuário com este e-mail."
             )
 
@@ -187,20 +192,15 @@ def criar_usuario(
 
     try:
 
-        senha_hash = (
-            gerar_hash_senha(
-                senha
-            )
+        senha_hash = gerar_hash_senha(
+            senha
         )
 
     except Exception as erro:
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Não foi possível processar "
-                f"a senha: {erro}"
-            )
+        raise ApplicationError(
+            "Não foi possível processar "
+            f"a senha: {erro}"
         )
 
     # ========================================================
@@ -346,7 +346,7 @@ def consultar_usuario(
 
     if id_usuario <= 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Usuário inválido."
         )
 
@@ -375,7 +375,7 @@ def consultar_usuario(
 
     if not usuario:
 
-                raise NotFoundError(
+        raise NotFoundError(
             "Usuário não encontrado."
         )
 
@@ -398,7 +398,7 @@ def atualizar_usuario(
 
     if id_usuario <= 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Usuário inválido."
         )
 
@@ -412,7 +412,7 @@ def atualizar_usuario(
 
     if not nome:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Nome obrigatório."
         )
 
@@ -434,7 +434,7 @@ def atualizar_usuario(
 
     if not cursor.fetchone():
 
-                raise NotFoundError(
+        raise NotFoundError(
             "Usuário não encontrado."
         )
 
@@ -470,7 +470,7 @@ def atualizar_usuario(
 
         if cursor.fetchone():
 
-                        raise ConflictError(
+            raise ConflictError(
                 "Já existe outro usuário com este e-mail."
             )
 
@@ -501,7 +501,7 @@ def atualizar_usuario(
 
     if cursor.rowcount == 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Não foi possível atualizar o usuário."
         )
 
@@ -532,7 +532,7 @@ def alterar_senha_usuario(
 
     if id_usuario <= 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Usuário inválido."
         )
 
@@ -544,7 +544,7 @@ def alterar_senha_usuario(
 
     if not nova_senha:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Nova senha obrigatória."
         )
 
@@ -566,7 +566,7 @@ def alterar_senha_usuario(
 
     if not cursor.fetchone():
 
-                raise NotFoundError(
+        raise NotFoundError(
             "Usuário não encontrado."
         )
 
@@ -618,7 +618,6 @@ def listar_perfis_usuario(
     id_usuario: int
 ):
 
-    # Valida existência do usuário.
     consultar_usuario(
         cursor=cursor,
         id_usuario=id_usuario
@@ -686,13 +685,13 @@ def vincular_perfil_usuario(
 
     if id_usuario <= 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Usuário inválido."
         )
 
     if id_perfil <= 0:
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Perfil inválido."
         )
 
@@ -729,7 +728,7 @@ def vincular_perfil_usuario(
 
     if not perfil:
 
-                raise NotFoundError(
+        raise NotFoundError(
             "Perfil não encontrado."
         )
 
@@ -737,7 +736,7 @@ def vincular_perfil_usuario(
         perfil.Ativo
     ):
 
-                raise BusinessRuleViolation(
+        raise BusinessRuleViolation(
             "Não é possível vincular um perfil inativo."
         )
 
@@ -856,9 +855,6 @@ def vincular_perfil_usuario(
 
 # ============================================================
 # REMOVER PERFIL DO USUÁRIO
-#
-# Não exclui fisicamente o histórico.
-# Apenas desativa o vínculo.
 # ============================================================
 
 def remover_perfil_usuario(
@@ -887,7 +883,7 @@ def remover_perfil_usuario(
 
     if cursor.rowcount == 0:
 
-                raise NotFoundError(
+        raise NotFoundError(
             "Vínculo ativo entre usuário e perfil não encontrado."
         )
 
@@ -908,8 +904,6 @@ def remover_perfil_usuario(
 
 # ============================================================
 # PERMISSÕES EFETIVAS DO USUÁRIO
-#
-# União das permissões de todos os seus perfis ativos.
 # ============================================================
 
 def listar_permissoes_usuario(

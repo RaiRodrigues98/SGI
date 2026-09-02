@@ -3,7 +3,13 @@ from fastapi import (
     Depends,
     HTTPException,
 )
-from domain.exceptions import BusinessRuleViolation, NotFoundError
+
+from domain.exceptions import (
+    BusinessRuleViolation,
+    NotFoundError,
+)
+
+from application.exceptions import ApplicationError
 
 from infrastructure.database.unit_of_work import SqlServerUnitOfWork
 
@@ -119,9 +125,11 @@ def _buscar_resultado_final_existente(
     itens = []
 
     for linha in linhas:
+
         qtd_estoque = float(
             linha.QtdEstoque or 0
         )
+
         quantidade_final = float(
             linha.QuantidadeFinal or 0
         )
@@ -303,14 +311,16 @@ def finalizar_inventario(
     # ========================================================
     # 2. USUÁRIO AUTENTICADO
     #
-    # Auditoria vem do JWT. Não confiamos no usuário enviado
-    # pelo frontend.
+    # Auditoria vem do JWT.
+    # Não confiamos no usuário enviado pelo frontend.
     # ========================================================
 
     usuario = (
-        str(usuario_atual["login"]).strip()
+        str(
+            usuario_atual["login"]
+        )
+        .strip()
     )
-
 
     uow = None
     cursor = None
@@ -319,20 +329,16 @@ def finalizar_inventario(
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         cursor = uow.cursor
 
         # ====================================================
         # 3. LOCK TRANSACIONAL DE FINALIZAÇÃO
-        #
-        # Garante que apenas uma requisição possa finalizar
-        # este inventário por vez.
-        #
-        # O lock pertence à transação e será liberado
-        # automaticamente no COMMIT ou ROLLBACK deste router.
         # ====================================================
 
         recurso_lock = (
-            f"SGI:INVENTARIO:{id_inventario}:FINALIZAR"
+            f"SGI:INVENTARIO:"
+            f"{id_inventario}:FINALIZAR"
         )
 
         cursor.execute(
@@ -350,10 +356,14 @@ def finalizar_inventario(
             recurso_lock
         )
 
-        lock_resultado = cursor.fetchone()
+        lock_resultado = (
+            cursor.fetchone()
+        )
 
         codigo_lock = (
-            int(lock_resultado.ResultadoLock)
+            int(
+                lock_resultado.ResultadoLock
+            )
             if lock_resultado
             else -999
         )
@@ -361,29 +371,42 @@ def finalizar_inventario(
         if codigo_lock < 0:
 
             if codigo_lock == -1:
-                detalhe_lock = "tempo limite excedido"
+
+                detalhe_lock = (
+                    "tempo limite excedido"
+                )
+
             elif codigo_lock == -2:
-                detalhe_lock = "solicitação cancelada"
+
+                detalhe_lock = (
+                    "solicitação cancelada"
+                )
+
             elif codigo_lock == -3:
-                detalhe_lock = "deadlock"
+
+                detalhe_lock = (
+                    "deadlock"
+                )
+
             else:
-                detalhe_lock = f"código {codigo_lock}"
+
+                detalhe_lock = (
+                    f"código {codigo_lock}"
+                )
 
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "Não foi possível reservar a finalização "
-                    "do inventário porque outra operação está "
-                    f"em andamento ({detalhe_lock}). "
+                    "Não foi possível reservar a "
+                    "finalização do inventário porque "
+                    "outra operação está em andamento "
+                    f"({detalhe_lock}). "
                     "Tente novamente."
                 )
             )
 
         # ====================================================
         # 4. BUSCA INVENTÁRIO
-        #
-        # Fazemos a identificação do tipo no router para
-        # direcionar ao service correto.
         # ====================================================
 
         cursor.execute(
@@ -401,17 +424,23 @@ def finalizar_inventario(
             id_inventario
         )
 
-        inventario = cursor.fetchone()
+        inventario = (
+            cursor.fetchone()
+        )
 
         if not inventario:
 
             raise HTTPException(
                 status_code=404,
-                detail="Inventário não encontrado."
+                detail=(
+                    "Inventário não encontrado."
+                )
             )
 
-        tipo = _normalizar_tipo(
-            inventario.Tipo
+        tipo = (
+            _normalizar_tipo(
+                inventario.Tipo
+            )
         )
 
         # ====================================================
@@ -433,10 +462,7 @@ def finalizar_inventario(
             )
 
         # ====================================================
-        # 6. EVITA CHAMAR SERVICE SE JÁ FINALIZADO
-        #
-        # Os services também validam isso.
-        # Mantemos aqui para resposta mais rápida.
+        # 6. INVENTÁRIO JÁ FINALIZADO
         # ====================================================
 
         status_inventario = (
@@ -445,7 +471,10 @@ def finalizar_inventario(
             )
         )
 
-        if status_inventario == "FINALIZADO":
+        if (
+            status_inventario
+            == "FINALIZADO"
+        ):
 
             resultado_existente = (
                 _buscar_resultado_final_existente(
@@ -469,7 +498,10 @@ def finalizar_inventario(
 
             return resultado_existente
 
-        if status_inventario == "CANCELADO":
+        if (
+            status_inventario
+            == "CANCELADO"
+        ):
 
             raise HTTPException(
                 status_code=400,
@@ -505,19 +537,18 @@ def finalizar_inventario(
 
         # ====================================================
         # 8. COMMIT
-        #
-        # Nenhum dos services deve executar commit.
-        #
-        # Se qualquer operação acima falhar, cairá no
-        # rollback e nenhuma finalização parcial ficará
-        # gravada.
         # ====================================================
 
         uow.commit()
 
         return resultado
 
+    # ========================================================
+    # EXCEÇÕES DE DOMÍNIO
+    # ========================================================
+
     except BusinessRuleViolation as erro:
+
         if uow:
             uow.rollback()
 
@@ -527,6 +558,7 @@ def finalizar_inventario(
         )
 
     except NotFoundError as erro:
+
         if uow:
             uow.rollback()
 
@@ -535,12 +567,34 @@ def finalizar_inventario(
             detail=str(erro)
         )
 
+    # ========================================================
+    # ERRO DA CAMADA DE APLICAÇÃO
+    # ========================================================
+
+    except ApplicationError as erro:
+
+        if uow:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    # ========================================================
+    # ERROS HTTP GERADOS PELO PRÓPRIO ROUTER
+    # ========================================================
+
     except HTTPException:
 
         if uow:
             uow.rollback()
 
         raise
+
+    # ========================================================
+    # ERRO NÃO PREVISTO
+    # ========================================================
 
     except Exception as erro:
 
@@ -551,6 +605,10 @@ def finalizar_inventario(
             status_code=500,
             detail=str(erro)
         )
+
+    # ========================================================
+    # ENCERRA UOW
+    # ========================================================
 
     finally:
 

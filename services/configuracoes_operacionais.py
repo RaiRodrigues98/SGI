@@ -1,6 +1,5 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
-from fastapi import HTTPException
-
+from application.exceptions import TechnicalConfigurationError
 
 # ============================================================
 # NORMALIZAÇÃO
@@ -71,14 +70,9 @@ def _validar_tabela_configuracao(
 
     if tabela is None:
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "A tabela "
-                "dbo.ConfiguracoesOperacionaisInventario "
-                "ainda não foi criada."
-            )
-        )
+       raise TechnicalConfigurationError(
+    "A tabela dbo.ConfiguracoesOperacionaisInventario ainda não foi criada."
+)
 
 
 # ============================================================

@@ -1,0 +1,26 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260902_163907.log
+[PASS] Regressão acumulada base (regressao_completa.py) - 172.77s
+       RESULTADO GERAL: APROVADO
+[PASS] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 4.51s
+       RESULTADO: APROVADO
+[PASS] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 2.80s
+       RESULTADO: APROVADO
+[PASS] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 8.04s
+       RESULTADO: APROVADO
+[PASS] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 2.26s
+       RESULTADO: APROVADO
+[PASS] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 5.24s
+       RESULTADO: APROVADO
+RESUMO FINAL
+OK     | Regressão acumulada base                   |  172.77s
+OK     | OFICIAL - Guard de regressão               |    4.51s
+OK     | Estágio 13 - Integridade transacional      |    2.80s
+OK     | Estágio 14 - Concorrência real             |    8.04s
+OK     | Estágio 15 - Segurança e RBAC              |    2.26s
+OK     | Estágio 16 - Performance e readiness       |    5.24s
+PASS: 6 | FAIL: 0 | SKIP: 0 | DURAÇÃO TOTAL: 195.63s
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA

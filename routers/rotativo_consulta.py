@@ -5,6 +5,7 @@ from fastapi import (
 )
 
 from database import get_connection
+from domain.exceptions import BusinessRuleViolation
 
 from services.rotativo_consulta import (
     consultar_localizacoes_ciclo,
@@ -81,7 +82,7 @@ def listar_localizacoes_ciclo(
             ordenar_por=ordenar_por
         )
 
-    except ValueError as erro:
+    except BusinessRuleViolation as erro:
         raise HTTPException(
             status_code=400,
             detail=str(

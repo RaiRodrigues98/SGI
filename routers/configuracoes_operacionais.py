@@ -3,7 +3,12 @@ from fastapi import (
     Depends,
     HTTPException,
 )
-from domain.exceptions import BusinessRuleViolation, NotFoundError
+
+from application.exceptions import TechnicalConfigurationError
+from domain.exceptions import (
+    BusinessRuleViolation,
+    NotFoundError,
+)
 
 from infrastructure.database.unit_of_work import SqlServerUnitOfWork
 
@@ -97,6 +102,7 @@ def consultar_configuracao(
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
         cursor = uow.cursor
 
@@ -107,14 +113,23 @@ def consultar_configuracao(
         )
 
     except BusinessRuleViolation as erro:
+
         raise HTTPException(
             status_code=400,
             detail=str(erro)
         )
 
     except NotFoundError as erro:
+
         raise HTTPException(
             status_code=404,
+            detail=str(erro)
+        )
+
+    except TechnicalConfigurationError as erro:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -194,7 +209,10 @@ def atualizar_configuracao(
         )
 
     usuario = (
-        str(usuario_atual["login"]).strip()
+        str(
+            usuario_atual["login"]
+        )
+        .strip()
     )
 
     # ========================================================
@@ -241,6 +259,7 @@ def atualizar_configuracao(
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
         cursor = uow.cursor
 
@@ -393,17 +412,14 @@ def atualizar_configuracao(
         )
 
         return {
-            "sucesso":
-                True,
-
+            "sucesso": True,
             "mensagem":
                 "Configuração atualizada com sucesso.",
-
-            "configuracao":
-                resultado
+            "configuracao": resultado
         }
 
     except BusinessRuleViolation as erro:
+
         if conn:
             uow.rollback()
 
@@ -413,11 +429,22 @@ def atualizar_configuracao(
         )
 
     except NotFoundError as erro:
+
         if conn:
             uow.rollback()
 
         raise HTTPException(
             status_code=404,
+            detail=str(erro)
+        )
+
+    except TechnicalConfigurationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 

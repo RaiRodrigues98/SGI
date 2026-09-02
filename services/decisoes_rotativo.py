@@ -1,5 +1,4 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
-from fastapi import HTTPException
 from services.ocorrencias_divergencia import (
     registrar_ocorrencia_divergencia,
     vincular_decisao_rotativo_ocorrencia,

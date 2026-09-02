@@ -324,7 +324,7 @@ def executar_teste(
                 "PYTHONIOENCODING": "utf-8",
             },
 
-            capture_output=True,
+            capture_output=False,
             text=True,
             encoding="utf-8",
             errors="replace",

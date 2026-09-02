@@ -1,11 +1,24 @@
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
 )
 
-from domain.exceptions import BusinessRuleViolation, ConflictError, NotFoundError
+from domain.exceptions import (
+    BusinessRuleViolation,
+    ConflictError,
+    NotFoundError,
+)
 
-from infrastructure.database.unit_of_work import SqlServerUnitOfWork
+from application.exceptions import ApplicationError
+
+from infrastructure.database.unit_of_work import (
+    SqlServerUnitOfWork,
+)
+
+from dependencies.auth import (
+    exigir_permissao,
+)
 
 from schemas.usuarios import (
     UsuarioCriacaoEntrada,
@@ -26,14 +39,7 @@ from services.usuarios import (
     listar_permissoes_usuario,
 )
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-)
-from dependencies.auth import (
-    exigir_permissao,
-)
+
 # ============================================================
 # ROUTER
 # ============================================================
@@ -49,6 +55,7 @@ router = APIRouter(
         )
     ]
 )
+
 
 # ============================================================
 # CRIAR USUÁRIO
@@ -67,6 +74,7 @@ def criar(
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
         cursor = uow.cursor
 
@@ -113,6 +121,16 @@ def criar(
             detail=str(erro)
         )
 
+    except ApplicationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
     except HTTPException:
 
         if conn:
@@ -138,12 +156,6 @@ def criar(
 
 # ============================================================
 # LISTAR USUÁRIOS
-#
-# Exemplos:
-#
-# GET /usuarios
-# GET /usuarios?ativo=true
-# GET /usuarios?ativo=false
 # ============================================================
 
 @router.get("")
@@ -152,18 +164,14 @@ def listar(
 ):
 
     uow = None
-    conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
-        conn = uow.connection
-        cursor = uow.cursor
 
         return listar_usuarios(
-            cursor=cursor,
+            cursor=uow.cursor,
             ativo=ativo
         )
 
@@ -185,6 +193,13 @@ def listar(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -223,18 +238,14 @@ def consultar(
         )
 
     uow = None
-    conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
-        conn = uow.connection
-        cursor = uow.cursor
 
         return consultar_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario
         )
 
@@ -256,6 +267,13 @@ def consultar(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -296,17 +314,16 @@ def atualizar(
 
     uow = None
     conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
-        cursor = uow.cursor
 
         resultado = atualizar_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario,
             nome=dados.nome,
             email=dados.email,
@@ -344,6 +361,16 @@ def atualizar(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -391,17 +418,16 @@ def alterar_senha(
 
     uow = None
     conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
-        cursor = uow.cursor
 
         resultado = alterar_senha_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario,
             nova_senha=dados.nova_senha
         )
@@ -437,6 +463,16 @@ def alterar_senha(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -482,15 +518,11 @@ def listar_perfis(
         )
 
     uow = None
-    conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
-        conn = uow.connection
-        cursor = uow.cursor
 
         return {
             "id_usuario":
@@ -498,7 +530,7 @@ def listar_perfis(
 
             "perfis":
                 listar_perfis_usuario(
-                    cursor=cursor,
+                    cursor=uow.cursor,
                     id_usuario=id_usuario
                 )
         }
@@ -521,6 +553,13 @@ def listar_perfis(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -561,17 +600,16 @@ def vincular_perfil(
 
     uow = None
     conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
-        cursor = uow.cursor
 
         resultado = vincular_perfil_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario,
             id_perfil=dados.id_perfil
         )
@@ -610,6 +648,16 @@ def vincular_perfil(
             detail=str(erro)
         )
 
+    except ApplicationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
     except HTTPException:
 
         if conn:
@@ -635,9 +683,6 @@ def vincular_perfil(
 
 # ============================================================
 # REMOVER PERFIL
-#
-# Não exclui o registro fisicamente.
-# Desativa o vínculo em UsuarioPerfis.
 # ============================================================
 
 @router.delete(
@@ -664,17 +709,16 @@ def remover_perfil(
 
     uow = None
     conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
+
         conn = uow.connection
-        cursor = uow.cursor
 
         resultado = remover_perfil_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario,
             id_perfil=id_perfil
         )
@@ -710,6 +754,16 @@ def remover_perfil(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
@@ -755,18 +809,14 @@ def listar_permissoes(
         )
 
     uow = None
-    conn = None
-    cursor = None
 
     try:
 
         uow = SqlServerUnitOfWork()
         uow.open()
-        conn = uow.connection
-        cursor = uow.cursor
 
         permissoes = listar_permissoes_usuario(
-            cursor=cursor,
+            cursor=uow.cursor,
             id_usuario=id_usuario
         )
 
@@ -799,6 +849,13 @@ def listar_permissoes(
 
         raise HTTPException(
             status_code=409,
+            detail=str(erro)
+        )
+
+    except ApplicationError as erro:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(erro)
         )
 
