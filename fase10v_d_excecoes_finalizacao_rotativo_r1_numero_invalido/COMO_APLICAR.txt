@@ -1,0 +1,84 @@
+FASE 10V-D - FINALIZAÇÃO ROTATIVO / VALIDAÇÃO DA R1
+===========================================================
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+└── _encerrar_inventario_rotativo_apos_r1_sem_recontagem()
+
+Erro:
+HTTP 400
+"Encerramento ROTATIVO pela R1 disponível somente para
+a primeira rodada."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+PRÉ-REQUISITOS
+--------------
+- 10U-H
+- 10V-A
+- 10V-B
+- 10V-C
+
+Se qualquer uma não for reconhecida:
+o instalador aborta antes de modificar o arquivo.
+
+POR QUE ESSE É O PRÓXIMO RECORTE
+--------------------------------
+É a primeira guarda do fluxo R1 sem recontagem e acontece
+antes de qualquer leitura/alteração operacional específica
+desse encerramento.
+
+Ela garante:
+NumeroRodada == 1
+
+As próximas validações conhecidas desse fluxo ficam fora do
+escopo desta fase:
+- sessões abertas na R1;
+- decisão RECONTAR ativa;
+- divergência da R1 sem tratamento concluído;
+- falha ao efetivar a finalização pela R1.
+
+PROTEÇÕES
+---------
+- total HTTPException cai exatamente em 1;
+- SQL idêntico antes/depois;
+- chamadas de negócio/repository idênticas;
+- SessoesContagem intocada;
+- DecisoesRotativo intocada;
+- OcorrenciasDivergencia intocada;
+- consolidar_resultado_final_rotativo_r1 intocada;
+- _finalizar_rodada_atual intocada;
+- UoW/commit/rollback/conexão intocados;
+- backup + auto-restore.
+
+Aplicar:
+python .\fase10v_d_excecoes_finalizacao_rotativo_r1_numero_invalido\aplicar_fase10v_d.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Mapa global esperado antes, se 10V-C passou:
+HTTP imports          : 9
+HTTPException raises  : 122
+HTTPException handlers: 0
+ValueError/RuntimeError: 69
+Custom exception types: 6
+
+Após 10V-D:
+HTTP imports:
+9 -> 9
+
+HTTPException raises:
+122 -> 121
+
+HTTPException handlers:
+0 -> 0
+
+ValueError/RuntimeError:
+69 -> 69
+
+Próximo recorte provável:
+10V-E -> sessões abertas na R1.

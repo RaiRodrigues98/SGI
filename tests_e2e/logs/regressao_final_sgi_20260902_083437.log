@@ -1,0 +1,448 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260902_083437.log
+[FAIL] Regressão acumulada base (regressao_completa.py) - 144.86s
+       - EST�GIO 6: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - REGRESS�O COMPLETA DO INVENT�RIO
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Pasta:  C:\Users\rai.sousa\Desktop\SGI\tests_e2e
+Timeout por teste: 600s
+Sa�da completa: SIM
+==============================================================================
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Fluxo E2E
+ARQUIVO:   teste_rotativo_e2e_v2.py
+==============================================================================
+====================================================================
+SGI - SU�TE E2E AUTOM�TICA DO INVENT�RIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+====================================================================
+[PASS] Autentica��o
+[PASS] Snapshot n�o pode ser gerado duas vezes
+[PASS] R1 sem diverg�ncia + finaliza��o idempotente
+[PASS] Prote��es + RECONTAR sem justificativa + R2 resolvida
+[FAIL] JUSTIFICAR exige texto + encerra na R1 sem R2: status inesperado: 500; retorno={'detail': 'Justificativa obrigat�ria para JUSTIFICAR_DIVERGENCIA.'}
+[PASS] R2 persistente finaliza como diverg�ncia confirmada
+
+====================================================================
+PASS: 5 | FAIL: 1
+RESULTADO: REPROVADO
+ - JUSTIFICAR exige texto + encerra na R1 sem R2: status inesperado: 500; retorno={'detail': 'Justificativa obrigat�ria para JUSTIFICAR_DIVERGENCIA.'}
+
+[REPROVADO] ROTATIVO - Fluxo E2E (15.5s)
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Prote��es
+ARQUIVO:   teste_rotativo_protecoes_corrigido.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 2 | PROTE��ES E INTEGRIDADE DO INVENT�RIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] Decis�o duplicada para a mesma diverg�ncia
+[PASS] Troca RECONTAR -> JUSTIFICAR
+[PASS] Troca JUSTIFICAR -> RECONTAR
+[PASS] Duplo POST de cria��o da R2
+[FAIL] Item n�o autorizado n�o pode ser contado na R2: A opera��o deveria ter sido bloqueada, mas foi aceita.
+[PASS] Opera��o ap�s invent�rio finalizado
+
+========================================================================
+PASS: 6 | FAIL: 1
+RESULTADO: REPROVADO
+ - Item n�o autorizado n�o pode ser contado na R2: A opera��o deveria ter sido bloqueada, mas foi aceita.
+
+[REPROVADO] ROTATIVO - Prote��es (13.9s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 3 - Estados limite e consist�ncia
+ARQUIVO:   teste_rotativo_estagio3.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 3 | ESTADOS LIMITE E CONSIST�NCIA DO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] Snapshot ausente bloqueia consolida��o
+[PASS] Reabertura substitui sess�o anterior na consolida��o
+[PASS] Finaliza��o repetida n�o duplica resultado
+[PASS] Sess�o encerrada n�o aceita nova contagem
+[PASS] R2 persistente finaliza sem criar R3
+
+========================================================================
+PASS: 6 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 3 - Estados limite e consist�ncia (9.8s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 4
+ARQUIVO:   teste_rotativo_estagio4.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 4 | CONCORR�NCIA L�GICA E INTEGRIDADE OPERACIONAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] Duplo in�cio reutiliza a sess�o aberta
+[PASS] Rodada antiga fica bloqueada ap�s cria��o da R2
+[PASS] Reabertura repetida mant�m somente a �ltima sess�o v�lida
+[FAIL] N�o permite decis�o para item sem diverg�ncia: status inesperado: 500; retorno={'detail': 'O item est� OK e n�o necessita decis�o de diverg�ncia.'}
+[FAIL] N�o permite decis�o ap�s rodada/invent�rio finalizado: status inesperado: 500; retorno={'detail': 'Somente invent�rio ABERTO pode receber decis�o rotativa.'}
+[PASS] Resultado final n�o possui duplicidade l�gica
+
+========================================================================
+PASS: 5 | FAIL: 2
+RESULTADO: REPROVADO
+ - N�o permite decis�o para item sem diverg�ncia: status inesperado: 500; retorno={'detail': 'O item est� OK e n�o necessita decis�o de diverg�ncia.'}
+ - N�o permite decis�o ap�s rodada/invent�rio finalizado: status inesperado: 500; retorno={'detail': 'Somente invent�rio ABERTO pode receber decis�o rotativa.'}
+
+[REPROVADO] EST�GIO 4 (13.0s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 5
+ARQUIVO:   teste_rotativo_estagio5.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 5 | CLASSIFICA��O DAS DIVERG�NCIAS ROTATIVAS
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] Sobra de quantidade = QUANTIDADE
+[PASS] Falta de item = FALTA / QUANTIDADE
+[PASS] Item inexistente no snapshot = ITEM_NAO_PREVISTO
+[FAIL] Troca de lote com total correto = LOTE_INCORRETO: O endere�o de teste n�o possui um c�digo com pelo menos dois lotes positivos; n�o � poss�vel validar LOTE_INCORRETO de forma determin�stica.
+[FAIL] Troca de lote com total incorreto = LOTE_E_QUANTIDADE: O endere�o de teste n�o possui um c�digo com pelo menos dois lotes positivos; n�o � poss�vel validar LOTE_INCORRETO de forma determin�stica.
+[PASS] Resumo contabiliza diverg�ncia de quantidade
+
+========================================================================
+PASS: 5 | FAIL: 2
+RESULTADO: REPROVADO
+ - Troca de lote com total correto = LOTE_INCORRETO: O endere�o de teste n�o possui um c�digo com pelo menos dois lotes positivos; n�o � poss�vel validar LOTE_INCORRETO de forma determin�stica.
+ - Troca de lote com total incorreto = LOTE_E_QUANTIDADE: O endere�o de teste n�o possui um c�digo com pelo menos dois lotes positivos; n�o � poss�vel validar LOTE_INCORRETO de forma determin�stica.
+
+[REPROVADO] EST�GIO 5 (13.6s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 6
+ARQUIVO:   teste_rotativo_estagio6_corrigido.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 6 | ISOLAMENTO ENTRE LOCALIZA��ES
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007
+========================================================================
+[PASS] Autentica��o
+[PASS] Diverg�ncia n�o contamina outra localiza��o
+[PASS] R2 cont�m somente a localiza��o decidida
+[FAIL] Decis�o com localiza��o incorreta � bloqueada: status inesperado: 500; retorno={'detail': 'O item est� OK e n�o necessita decis�o de diverg�ncia.'}
+[PASS] Duas localiza��es corretas finalizam sem R2
+[PASS] Resultado final preserva as duas localiza��es
+
+========================================================================
+PASS: 5 | FAIL: 1
+RESULTADO: REPROVADO
+ - Decis�o com localiza��o incorreta � bloqueada: status inesperado: 500; retorno={'detail': 'O item est� OK e n�o necessita decis�o de diverg�ncia.'}
+
+[REPROVADO] EST�GIO 6 (18.5s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 7
+ARQUIVO:   teste_rotativo_estagio7.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 7 | DECIS�ES, OCORR�NCIAS E RASTREABILIDADE
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] RECONTAR cria decis�o e ocorr�ncia vinculadas
+[PASS] R2 resolvida fecha corretamente a ocorr�ncia
+[PASS] R2 persistente confirma a diverg�ncia
+[PASS] JUSTIFICAR n�o cria R2 e preserva diverg�ncia final
+[PASS] Substitui��o de decis�o n�o duplica candidato da R2
+[PASS] Troca RECONTAR -> JUSTIFICAR remove candidato da R2
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 7 (16.9s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 8
+ARQUIVO:   teste_rotativo_estagio8.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 8 | RESULTADO FINAL E CONSIST�NCIA GERENCIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+[PASS] R1 sem diverg�ncia gera resultado final consistente
+[PASS] R2 resolvida usa a quantidade correta da R2
+[PASS] R2 persistente preserva a diverg�ncia final
+[PASS] JUSTIFICAR preserva quantidade e diverg�ncia da R1
+[PASS] Resultado final n�o possui duplicidade l�gica
+[PASS] Resultado final permanece idempotente
+
+========================================================================
+PASS: 7 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 8 (13.2s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 9
+ARQUIVO:   teste_rotativo_estagio9.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 9 | COBERTURA E CICLO DO INVENT�RIO ROTATIVO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007
+========================================================================
+[PASS] Autentica��o
+[PASS] Ciclo aberto/criado e abertura idempotente
+[PASS] Consulta e cobertura inicial s�o coerentes
+[PASS] Localiza��o pendente entra em EM_CONTAGEM
+[PASS] Conclus�o operacional atualiza cobertura
+[PASS] Conclus�o repetida n�o duplica cobertura
+[PASS] V�nculo invent�rio/rodada e �ltima contagem s�o preservados
+[PASS] Filtros operacionais respeitam o status do ciclo
+
+========================================================================
+PASS: 8 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 9 (10.1s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 10 - Regress�o OFICIAL
+ARQUIVO:   teste_oficial_estagio10.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 10 | REGRESS�O DO INVENT�RIO OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Localiza��o: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+
+========================================================================
+1. CRIANDO INVENT�RIO OFICIAL
+========================================================================
+Invent�rio: 784
+C�digo: E2E-OF10-8349003035
+
+========================================================================
+2. ESCOPO + SNAPSHOT
+========================================================================
+Escopo: {'sucesso': True, 'id_inventario': 784, 'codigo_inventario': 'E2E-OF10-8349003035', 'localizacoes_recebidas': 1, 'adicionadas': ['01PLAQUETA'], 'reativadas': [], 'ja_existentes': [], 'mensagem': 'Escopo do invent�rio atualizado com sucesso.'}
+Registros snapshot: 2
+Item usado para diverg�ncia: ('71554091', '3007863031 - 40') | estoque: 2.0
+
+========================================================================
+3. R1 COMPLETA - GERANDO 1 DIVERG�NCIA
+========================================================================
+Resumo R1: {'total_registros': 2, 'ok': 1, 'divergencias': 1, 'faltas': 0, 'sobras': 0}
+Diverg�ncias R1: 1
+
+========================================================================
+4. GERANDO R2
+========================================================================
+Preview R2: {'id_inventario': 784, 'codigo_inventario': 'E2E-OF10-8349003035', 'tipo_inventario': 'OFICIAL', 'status_inventario': 'ABERTO', 'preview': {'pode_criar': True, 'motivo': None, 'id_inventario': 784, 'numero_rodada_atual': 1, 'numero_proxima_rodada': 2, 'tipo_proxima_rodada': 'COMPLETA', 'origem_candidatos': 'ESCOPO_COMPLETO', 'candidatos': 0, 'pode_encaminhar_gestor': False, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'itens_candidatos': []}}
+
+========================================================================
+5. R2 COMPLETA - REPETINDO A MESMA DIVERG�NCIA
+========================================================================
+Resumo R2: {'total_registros': 2, 'ok': 1, 'divergencias': 1, 'faltas': 0, 'sobras': 0}
+
+========================================================================
+6. GERANDO R3 DE DIVERG�NCIAS
+========================================================================
+Preview R3: {'id_inventario': 784, 'codigo_inventario': 'E2E-OF10-8349003035', 'tipo_inventario': 'OFICIAL', 'status_inventario': 'ABERTO', 'preview': {'pode_criar': True, 'motivo': None, 'id_inventario': 784, 'numero_rodada_atual': 2, 'numero_proxima_rodada': 3, 'tipo_proxima_rodada': 'DIVERGENCIAS', 'origem_candidatos': 'DIVERGENCIAS_R1_R2', 'candidatos': 1, 'pode_encaminhar_gestor': False, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'itens_candidatos': [{'codigo': '71554091', 'lote': '3007863031 - 40', 'motivo': 'DIVERGENCIA_R1_R2'}]}}
+R3: {'criada': True, 'id_rodada': 1028, 'numero_rodada': 3, 'status': 'ABERTA', 'data_hora_inicio': '2026-09-02T08:36:44.032000', 'tipo_rodada': 'DIVERGENCIAS', 'rodada_origem': 2, 'rodada_anterior_finalizada': True, 'origem_candidatos': 'DIVERGENCIAS_R1_R2', 'itens_gerados': 1, 'localizacoes_geradas': 1, 'localizacoes': ['01PLAQUETA'], 'candidatos': 1, 'configuracao': {'rodadas_iniciais': 2, 'max_rodadas': 6, 'recontagem_por_localizacao': True, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 5}, 'pode_encaminhar_gestor': False}
+
+========================================================================
+7. R3 - RECONTANDO CORRETAMENTE
+========================================================================
+Localiza��es R3: ['01PLAQUETA']
+Resumo R3: {'total_itens': 1, 'itens_originais_recontagem': 1, 'itens_novos_encontrados': 0, 'ok': 1, 'divergencias': 0, 'faltas': 0, 'sobras': 0, 'aguardando_contagem': 0, 'pendentes_proxima_rodada': 0, 'total_localizacoes': 1, 'localizacoes_concluidas': 1, 'localizacoes_pendentes': 0}
+Status R3: CONCILIADA
+
+========================================================================
+8. VALIDANDO AN�LISE GERENCIAL
+========================================================================
+Resumo gestor: {'total_itens': 2, 'ok': 2, 'divergencias': 0, 'faltas': 0, 'sobras': 0, 'sem_contagem': 0, 'itens_para_decisao_gestor': 0, 'itens_sem_decisao': 0, 'aceitaram_estoque': 0, 'aceitaram_contagem': 0, 'nova_recontagem': 0, 'itens_resolvidos_gestor': 0, 'itens_resolvidos_total': 2, 'rodadas_nao_finalizadas': 1}
+Pode finalizar: True
+
+========================================================================
+9. FINALIZANDO INVENT�RIO OFICIAL
+========================================================================
+Finaliza��o: {'sucesso': True, 'id_inventario': 784, 'codigo_inventario': 'E2E-OF10-8349003035', 'status': 'FINALIZADO', 'finalizado_por': 'admin', 'rodada_final': 3, 'resumo_final': {'total_itens': 2, 'ok': 2, 'faltas': 0, 'sobras': 0, 'divergencias': 0}, 'itens': [{'codigo': '71256360', 'lote': '3007849339 - 220', 'qtd_estoque': 1.0, 'quantidade_final': 1.0, 'diferenca_final': 0.0, 'status_final': 'OK', 'origem_quantidade': 'CONTAGEM_CONCILIADA', 'id_decisao_gestor': None, 'rodada_final': 2}, {'codigo': '71554091', 'lote': '3007863031 - 40', 'qtd_estoque': 2.0, 'quantidade_final': 2.0, 'diferenca_final': 0.0, 'status_final': 'OK', 'origem_quantidade': 'CONTAGEM_CONCILIADA', 'id_decisao_gestor': None, 'rodada_final': 3}], 'mensagem': 'Resultado final consolidado e invent�rio finalizado com sucesso.'}
+
+========================================================================
+10. VALIDANDO RESULTADO FINAL
+========================================================================
+Status resultado final: FINALIZADO
+
+========================================================================
+REGRESS�O OFICIAL CONCLU�DA COM SUCESSO
+========================================================================
+Invent�rio testado: 784
+R1: 1026
+R2: 1027
+R3: 1028
+[PASS] Fluxo OFICIAL R1 + R2 + R3 + finaliza��o
+
+========================================================================
+PASS: 2 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 10 - Regress�o OFICIAL (5.2s)
+
+==============================================================================
+EXECUTANDO: EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL
+ARQUIVO:   teste_estagio12_coexistencia.py
+==============================================================================
+========================================================================
+SGI - EST�GIO 12 | COEXIST�NCIA ROTATIVO + OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+========================================================================
+[PASS] Autentica��o
+
+========================================================================
+1. CRIANDO ROTATIVO E OFICIAL SIMULTANEAMENTE
+========================================================================
+ROTATIVO: invent�rio 785, R1 1029
+OFICIAL:  invent�rio 786, R1 1030
+
+========================================================================
+2. ESCOPO + SNAPSHOT INDEPENDENTES
+========================================================================
+Snapshot ROTATIVO: 2
+Snapshot OFICIAL:  2
+
+========================================================================
+3. ROTATIVO - DIVERG�NCIA + JUSTIFICATIVA
+========================================================================
+
+========================================================================
+4. CONFIRMANDO QUE O OFICIAL CONTINUA INDEPENDENTE
+========================================================================
+ROTATIVO finalizado; OFICIAL segue operacional.
+
+========================================================================
+5. OFICIAL R1 - CRIANDO DIVERG�NCIA
+========================================================================
+
+========================================================================
+6. OFICIAL R2 - MESMA DIVERG�NCIA
+========================================================================
+
+========================================================================
+7. OFICIAL R3 - SOMENTE DIVERG�NCIAS
+========================================================================
+
+========================================================================
+8. GESTOR + FINALIZA��O OFICIAL
+========================================================================
+
+========================================================================
+9. VALIDA��ES FINAIS DE ISOLAMENTO
+========================================================================
+ROTATIVO finalizado: 785
+OFICIAL finalizado:  786
+Resultados finais permaneceram independentes.
+[PASS] ROTATIVO e OFICIAL coexistem sem contamina��o de estado
+
+========================================================================
+PASS: 2 | FAIL: 0
+RESULTADO: APROVADO
+========================================================================
+
+[APROVADO] EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL (14.8s)
+
+==============================================================================
+SGI - RESUMO DA REGRESS�O COMPLETA
+==============================================================================
+TESTE                                         STATUS           TEMPO  ARQUIVO
+--------------------------------------------------------------------------------------------------------------
+ROTATIVO - Fluxo E2E                          REPROVADO        15.5s  teste_rotativo_e2e_v2.py
+ROTATIVO - Prote��es                          REPROVADO        13.9s  teste_rotativo_protecoes_corrigido.py
+EST�GIO 3 - Estados limite e consist�ncia     APROVADO          9.8s  teste_rotativo_estagio3.py
+EST�GIO 4                                     REPROVADO        13.0s  teste_rotativo_estagio4.py
+EST�GIO 5                                     REPROVADO        13.6s  teste_rotativo_estagio5.py
+EST�GIO 6                                     REPROVADO        18.5s  teste_rotativo_estagio6_corrigido.py
+EST�GIO 7                                     APROVADO         16.9s  teste_rotativo_estagio7.py
+EST�GIO 8                                     APROVADO         13.2s  teste_rotativo_estagio8.py
+EST�GIO 9                                     APROVADO         10.1s  teste_rotativo_estagio9.py
+EST�GIO 10 - Regress�o OFICIAL                APROVADO          5.2s  teste_oficial_estagio10.py
+EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL  APROVADO         14.8s  teste_estagio12_coexistencia.py
+
+TOTAL PREVISTO: 11
+EXECUTADOS:     11
+APROVADOS:      6
+REPROVADOS:     5
+AUSENTES:       0
+TEMPO TOTAL:    2m 24.6s
+
+RESULTADO GERAL: REPROVADO
+
+FALHAS:
+ - ROTATIVO - Fluxo E2E: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+ - ROTATIVO - Prote��es: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+ - EST�GIO 4: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+ - EST�GIO 5: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+ - EST�GIO 6: C�digo de sa�da: 1 | Resultado textual: REPROVADO
+==============================================================================
+------- FIM DA SAÍDA -------
+
+[PASS] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 9.83s
+       RESULTADO: APROVADO
+[PASS] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 3.76s
+       RESULTADO: APROVADO
+[PASS] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 12.18s
+       RESULTADO: APROVADO
+[FAIL] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 2.92s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+============================================================================
+SGI - EST�GIO 15 | SEGURAN�A, PERMISS�ES E ISOLAMENTO
+============================================================================
+[PASS] Autentica��o obrigat�ria nos endpoints protegidos
+[PASS] Token inv�lido � rejeitado
+[PASS] Autentica��o e prepara��o dos invent�rios isolados
+[PASS] Rodada de outro invent�rio n�o inicia sess�o
+[PASS] An�lise n�o aceita rodada de outro invent�rio
+[FAIL] Decis�o ROTATIVO n�o aceita rodada de outro invent�rio: Registrar decis�o no Invent�rio A usando Rodada B: deveria ser rejeitado com 4xx controlado, por�m retornou HTTP 500: {'detail': 'Rodada n�o encontrada para este invent�rio.'}
+[PASS] Sess�o inexistente/adulterada n�o recebe contagem
+[INFO] Isolamento real entre tenants n�o executado: defina SGI_CLIENTE2_LOGIN, SGI_CLIENTE2_PASSWORD e SGI_CLIENTE2_ID para habilitar.
+
+============================================================================
+PASS: 6 | FAIL: 1
+RESULTADO: REPROVADO
+ - Decis�o ROTATIVO n�o aceita rodada de outro invent�rio: Registrar decis�o no Invent�rio A usando Rodada B: deveria ser rejeitado com 4xx controlado, por�m retornou HTTP 500: {'detail': 'Rodada n�o encontrada para este invent�rio.'}
+============================================================================
+------- FIM DA SAÍDA -------
+
+[PASS] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 7.32s
+       RESULTADO: APROVADO
+RESUMO FINAL
+FALHOU | Regressão acumulada base                   |  144.86s
+OK     | OFICIAL - Guard de regressão               |    9.83s
+OK     | Estágio 13 - Integridade transacional      |    3.76s
+OK     | Estágio 14 - Concorrência real             |   12.18s
+FALHOU | Estágio 15 - Segurança e RBAC              |    2.92s
+OK     | Estágio 16 - Performance e readiness       |    7.32s
+PASS: 4 | FAIL: 2 | SKIP: 0 | DURAÇÃO TOTAL: 181.20s
+RESULTADO FINAL: REPROVADO
+O núcleo não deve avançar para homologação até a(s) falha(s) serem classificadas e corrigidas.

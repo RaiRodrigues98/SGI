@@ -1,0 +1,95 @@
+FASE 10R - CANDIDATOS ROTATIVO
+================================
+
+Alvo:
+services\rodadas\candidatos_rotativo.py
+
+Auditoria atual:
+2 HTTPException.
+
+1) _validar_divergencias_r1_rotativo_tratadas()
+HTTP 400
+
+Regra:
+Se existe divergência da R1 sem uma decisão válida
+(RECONTAR ou JUSTIFICAR_DIVERGENCIA), a R2 não pode prosseguir.
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+2) _resolver_coluna_quantidade_rotativo()
+HTTP 500
+
+Regra técnica:
+O código tenta identificar a coluna de quantidade nas tabelas
+do snapshot/contagem. Se nenhuma coluna conhecida existir, a R2
+é abortada para evitar comparação incorreta.
+
+Mapeamento:
+HTTP 500 -> TechnicalConfigurationError
+
+IMPORTANTE:
+O HTTP 500 NÃO vira DomainError.
+
+Resultado arquitetural:
+services\rodadas\candidatos_rotativo.py
+- 0 HTTPException
+- 0 FastAPI/Starlette
+- BusinessRuleViolation para a regra operacional
+- TechnicalConfigurationError para falha técnica/schema
+
+O instalador:
+- exige exatamente 1x400 + 1x500;
+- exige as funções exatas;
+- preserva detail via AST;
+- usa grafo cross-module com facades/reexports;
+- encontra todos os callers transitivos;
+- bloqueia wrapper `except Exception -> HTTPException`;
+- adiciona nos routers:
+  BusinessRuleViolation -> HTTP 400
+  TechnicalConfigurationError -> HTTP 500
+- reutiliza handlers já existentes;
+- preserva rollback/log;
+- auto-restaura tudo em caso de erro.
+
+Não altera:
+- SQL
+- cálculo de divergência
+- chave Localização + Código + Lote
+- regra RECONTAR/JUSTIFICAR_DIVERGENCIA
+- seleção de candidatos R2
+- UoW
+- commits
+- conexões
+- rotas
+- respostas de sucesso
+
+Pré-requisito:
+Fase 10Q aplicada.
+
+Aplicar:
+python .\fase10r_excecoes_candidatos_rotativo\aplicar_fase10r.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado partindo do mapa anterior à 10Q:
+Após 10Q:
+HTTP imports: 13
+HTTP raises : 145
+
+Após 10R:
+HTTP imports: 12
+HTTP raises : 143
+
+ValueError/RuntimeError:
+69 -> 69
+
+Custom exception types:
+6 -> 6
+
+Próximo candidato:
+Fase 10S -> services\rodadas\lifecycle.py
+3 HTTPException.

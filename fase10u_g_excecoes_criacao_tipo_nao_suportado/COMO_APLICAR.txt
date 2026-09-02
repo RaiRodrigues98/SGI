@@ -1,0 +1,88 @@
+FASE 10U-G - TIPO DE PRÓXIMA RODADA NÃO SUPORTADO
+====================================================
+
+Alvo:
+services\rodadas\criacao.py
+└── _selecionar_candidatos()
+    └── else final:
+        "Tipo de próxima rodada não suportado: {tipo_proxima}"
+
+Pré-requisito:
+10U-F aplicada.
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+Por que é BusinessRuleViolation:
+o fluxo recebeu um TipoRodada não aceito pela regra de criação.
+A resposta externa continua HTTP 400.
+
+Baseline esperado antes:
+criacao.py:
+- 6 HTTPException
+- todos dentro de _selecionar_candidatos
+
+_selecionar_candidatos:
+- 1 BusinessRuleViolation da 10U-F (GESTOR)
+- 6 HTTPException
+
+Após:
+criacao.py:
+- 5 HTTPException
+
+_selecionar_candidatos:
+- 2 BusinessRuleViolation
+- 5 HTTPException
+
+Os cinco HTTPException remanescentes são somente do ramo
+gerencial/NOVA_RECONTAGEM:
+1. divergentes sem decisão do gestor
+2. todas divergências tratadas / apto para finalização
+3. nenhum item NOVA_RECONTAGEM
+4. análise gerencial indica itens, mas sem registro NOVA_RECONTAGEM
+5. inconsistência análise gerencial x decisões
+
+IMPORTANTE:
+A 10U-G NÃO edita routers.
+A 10U-F já garantiu a mesma cadeia:
+BusinessRuleViolation -> HTTP 400.
+
+Proteções:
+- sys.sp_getapplock
+- Resource SGI:ROTATIVO:PROXIMA_RODADA
+- Exclusive
+- Transaction
+- timeout 10000
+- SQL
+- UoW
+- commit/rollback
+
+Aplicar:
+python .\fase10u_g_excecoes_criacao_tipo_nao_suportado\aplicar_fase10u_g.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado se 10U-F deixou:
+HTTP imports: 10
+HTTP raises : 131
+
+Após 10U-G:
+HTTP imports: 10
+HTTP raises : 130
+
+FastAPI ainda permanece porque existem 5 raises.
+
+Próxima fase:
+10U-H -> fechar o ramo gerencial de _selecionar_candidatos()
+         5 HTTP 400 -> BusinessRuleViolation
+
+Como os cinco erros pertencem ao mesmo ramo semântico
+NOVA_RECONTAGEM/decisão do gestor, podem ser migrados juntos.
+
+Depois da 10U-H:
+- criacao.py deverá chegar a 0 HTTPException
+- o import FastAPI poderá ser removido completamente do módulo
+- HTTP imports deverá cair em 1

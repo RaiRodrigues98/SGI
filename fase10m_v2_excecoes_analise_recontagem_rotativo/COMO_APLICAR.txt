@@ -1,0 +1,71 @@
+FASE 10M v2 - ANALISE_RECONTAGEM_ROTATIVO
+============================================
+
+USE ESTA VERSÃO NO LUGAR DA 10M v1.
+
+Por que a v1 abortou?
+---------------------
+A v1 encontrou corretamente:
+- 2 x HTTP 400
+- 1 x HTTP 404
+- 1 x HTTP 500
+
+E encontrou os services intermediários:
+- services.rodadas.criacao.criar_proxima_rodada
+- services.rodadas.finalizacao_rotativo._encerrar_inventario_rotativo_apos_r2
+- services.rodadas.preview.visualizar_proxima_rodada
+
+Porém não chegou aos routers porque a arquitetura atual usa
+services.rodadas_service como facade de compatibilidade/reexport.
+
+Exemplo:
+routers.rodadas
+    -> services.rodadas_service.criar_proxima_rodada
+    -> services.rodadas.criacao.criar_proxima_rodada
+
+A v1 resolvia somente:
+módulo -> função definida diretamente
+
+A v2 resolve:
+- funções locais;
+- imports `from modulo import funcao`;
+- cadeias transitivas de reexport;
+- facades;
+- aliases simples `exportado = importado`.
+
+Nenhuma regra da Fase 10M mudou.
+
+Mapeamento mantido:
+HTTP 400 -> BusinessRuleViolation
+HTTP 404 -> NotFoundError
+HTTP 500 -> TechnicalConfigurationError
+
+O HTTP 500 continua sendo uma exceção técnica da camada application,
+não uma DomainError.
+
+Segurança:
+- exige exatamente 2x400 + 1x404 + 1x500;
+- não altera SQL;
+- não altera classificação ROTATIVO;
+- não altera commit;
+- não altera conexão/UoW;
+- não altera services intermediários;
+- replica rollback/log do router;
+- auto-restore em qualquer falha;
+- se ainda não alcançar router após resolver facades, aborta antes
+  das alterações do service/router.
+
+A tentativa anterior abortou ANTES da etapa de backup/mutação
+dos services e routers. Não é necessário restaurar manualmente.
+
+Aplicar:
+python .\fase10m_v2_excecoes_analise_recontagem_rotativo\aplicar_fase10m_v2.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Esperado após sucesso:
+HTTP imports: 17 -> 16
+HTTPException raises: 165 -> 161

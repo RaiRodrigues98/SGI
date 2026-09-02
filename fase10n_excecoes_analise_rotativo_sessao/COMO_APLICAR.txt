@@ -1,0 +1,107 @@
+FASE 10N - ANALISE_ROTATIVO | SESSÃO
+=====================================
+
+Pré-condição:
+Regressão após a Fase 10M v2:
+APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Alvo:
+services\analise_rotativo.py
+└── analisar_sessao_rotativo()
+
+Auditoria atual:
+8 HTTPException na função:
+- 5 x HTTP 400
+- 3 x HTTP 404
+
+Erros do alvo:
+404 - Sessão não encontrada.
+400 - Sessão inválida.
+400 - Sessão sem inventário vinculado.
+400 - Sessão sem rodada vinculada.
+400 - Sessão sem localização válida.
+404 - Inventário não encontrado.
+400 - análise disponível somente para ROTATIVO.
+404 - rodada da sessão não encontrada.
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+HTTP 404 -> NotFoundError
+
+IMPORTANTE: MIGRAÇÃO PARCIAL
+----------------------------
+O mesmo arquivo ainda possui 3 HTTPException em:
+
+analisar_inventario_rotativo()
+
+Esses 3 ficam para a Fase 10O.
+
+Por isso a 10N:
+- NÃO remove FastAPI do service;
+- adiciona:
+  from domain.exceptions import BusinessRuleViolation, NotFoundError
+- converte somente os 8 raises do analisar_sessao_rotativo.
+
+Proteção estrutural:
+Antes:
+- exige exatamente 11 HTTPException no arquivo;
+- exige exatamente 8 no alvo;
+- exige exatamente 3 em analisar_inventario_rotativo;
+- exige perfil do alvo 5x400 + 3x404.
+
+Depois:
+- exige 0 HTTPException no alvo;
+- exige 8 exceções semânticas no alvo;
+- exige exatamente 3 HTTPException no arquivo;
+- os 3 precisam continuar em analisar_inventario_rotativo.
+
+Consumers:
+O endpoint histórico de análise de sessão em routers\analise.py
+chama analisar_sessao_rotativo no caminho ROTATIVO.
+
+O instalador usa o mesmo resolvedor de facades/reexports da 10M v2,
+portanto não depende de um consumer fixo.
+
+Nos routers:
+- reutiliza BusinessRuleViolation/NotFoundError já existentes;
+- não duplica handlers;
+- replica o prefixo do except HTTPException (rollback/log quando houver);
+- mantém HTTP 400/404.
+
+Não altera:
+- SQL
+- conciliação Localização + Código + Lote
+- lógica R1/R2+
+- classificação de divergência
+- UoW
+- commit
+- conexão
+- rotas
+- retornos de sucesso
+- analisar_inventario_rotativo
+
+Aplicar:
+python .\fase10n_excecoes_analise_rotativo_sessao\aplicar_fase10n.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado da 10N:
+HTTP imports:
+16 -> 16
+(o import permanece para a 10O)
+
+HTTPException raises:
+161 -> 153
+
+ValueError/RuntimeError:
+69 -> 69
+
+Próxima fase:
+10O -> analisar_inventario_rotativo()
+       3 HTTPException restantes
+
+Após a 10O, se não houver outro uso HTTP no service,
+o import FastAPI poderá ser removido completamente.

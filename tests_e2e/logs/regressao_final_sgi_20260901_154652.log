@@ -1,0 +1,253 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260901_154652.log
+[FAIL] Regressão acumulada base (regressao_completa.py) - 2.58s
+       RESULTADO GERAL: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - REGRESS�O COMPLETA DO INVENT�RIO
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Pasta:  C:\Users\rai.sousa\Desktop\SGI\tests_e2e
+Timeout por teste: 600s
+Sa�da completa: SIM
+==============================================================================
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Fluxo E2E
+ARQUIVO:   teste_rotativo_e2e_v2.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Prote��es
+ARQUIVO:   teste_rotativo_protecoes_corrigido.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 3 - Estados limite e consist�ncia
+ARQUIVO:   teste_rotativo_estagio3.py
+==============================================================================
+
+[REPROVADO] EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 4
+ARQUIVO:   teste_rotativo_estagio4.py
+==============================================================================
+
+[REPROVADO] EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 5
+ARQUIVO:   teste_rotativo_estagio5.py
+==============================================================================
+
+[REPROVADO] EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 6
+ARQUIVO:   teste_rotativo_estagio6_corrigido.py
+==============================================================================
+
+[REPROVADO] EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 7
+ARQUIVO:   teste_rotativo_estagio7.py
+==============================================================================
+
+[REPROVADO] EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 8
+ARQUIVO:   teste_rotativo_estagio8.py
+==============================================================================
+
+[REPROVADO] EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 9
+ARQUIVO:   teste_rotativo_estagio9.py
+==============================================================================
+
+[REPROVADO] EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 10 - Regress�o OFICIAL
+ARQUIVO:   teste_oficial_estagio10.py
+==============================================================================
+
+[REPROVADO] EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL
+ARQUIVO:   teste_estagio12_coexistencia.py
+==============================================================================
+
+[REPROVADO] EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+SGI - RESUMO DA REGRESS�O COMPLETA
+==============================================================================
+TESTE                                         STATUS           TEMPO  ARQUIVO
+--------------------------------------------------------------------------------------------------------------
+ROTATIVO - Fluxo E2E                          REPROVADO         0.2s  teste_rotativo_e2e_v2.py
+ROTATIVO - Prote��es                          REPROVADO         0.2s  teste_rotativo_protecoes_corrigido.py
+EST�GIO 3 - Estados limite e consist�ncia     REPROVADO         0.2s  teste_rotativo_estagio3.py
+EST�GIO 4                                     REPROVADO         0.2s  teste_rotativo_estagio4.py
+EST�GIO 5                                     REPROVADO         0.2s  teste_rotativo_estagio5.py
+EST�GIO 6                                     REPROVADO         0.3s  teste_rotativo_estagio6_corrigido.py
+EST�GIO 7                                     REPROVADO         0.2s  teste_rotativo_estagio7.py
+EST�GIO 8                                     REPROVADO         0.2s  teste_rotativo_estagio8.py
+EST�GIO 9                                     REPROVADO         0.2s  teste_rotativo_estagio9.py
+EST�GIO 10 - Regress�o OFICIAL                REPROVADO         0.2s  teste_oficial_estagio10.py
+EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL  REPROVADO         0.2s  teste_estagio12_coexistencia.py
+
+TOTAL PREVISTO: 11
+EXECUTADOS:     11
+APROVADOS:      0
+REPROVADOS:     11
+AUSENTES:       0
+TEMPO TOTAL:    2.4s
+
+RESULTADO GERAL: REPROVADO
+
+FALHAS:
+ - ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+ - ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+==============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 0.22s
+
+------- SAÍDA DO TESTE REPROVADO -------
+========================================================================
+SGI - EST�GIO 10 | REGRESS�O DO INVENT�RIO OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Localiza��o: 01PLAQUETA
+========================================================================
+
+[STDERR]
+Traceback (most recent call last):
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 2040, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 1983, in main
+    api.login()
+    ~~~~~~~~~^^
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 257, in login
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 0.24s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+========================================================================
+SGI - EST�GIO 13 | INTEGRIDADE TRANSACIONAL E RECUPERA��O DE ESTADO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007
+========================================================================
+[FAIL] Est�gio 13: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+
+========================================================================
+PASS: 1 | FAIL: 1
+RESULTADO: REPROVADO
+========================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 0.24s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+============================================================================
+SGI - EST�GIO 14 | CONCORR�NCIA REAL / MULTIUSU�RIO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+============================================================================
+[FAIL] Autentica��o: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+
+============================================================================
+PASS: 0 | FAIL: 1
+RESULTADO: REPROVADO
+============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 0.80s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+============================================================================
+SGI - EST�GIO 15 | SEGURAN�A, PERMISS�ES E ISOLAMENTO
+============================================================================
+[FAIL] Autentica��o obrigat�ria nos endpoints protegidos: Cria��o de invent�rio sem token: opera��o indevida foi aceita. Retorno: {'sucesso': True, 'id_inventario': 511, 'codigo_inventario': 'E2E-C15-NOTOKEN-8288415560', 'tipo': 'ROTATIVO', 'cliente_id': 53, 'cliente': 'endress', 'descricao': 'Estagio 15 sem token', 'armazem': 'ML007', 'status': 'ABERTO', 'rodada_atual': 1, 'id_rodada': 667, 'numero_rodada': 1, 'status_rodada': 'ABERTA', 'tipo_rodada': 'COMPLETA', 'criado_por': 'dev', 'data_hora_inicio': '2026-09-01T15:46:54.027000', 'data_hora_criacao': '2026-09-01T15:46:54.027000', 'configuracao': {'id_configuracao': 1, 'rodadas_iniciais': 1, 'max_rodadas': 2, 'contagem_cega': True}, 'proximo_passo': 'DEFINIR_ESCOPO'}
+[FAIL] Token inv�lido � rejeitado: Cria��o com token inv�lido: opera��o indevida foi aceita. Retorno: {'sucesso': True, 'id_inventario': 512, 'codigo_inventario': 'E2E-C15-BADTOKEN-8288416039', 'tipo': 'ROTATIVO', 'cliente_id': 53, 'cliente': 'endress', 'descricao': 'Estagio 15 token invalido', 'armazem': 'ML007', 'status': 'ABERTO', 'rodada_atual': 1, 'id_rodada': 668, 'numero_rodada': 1, 'status_rodada': 'ABERTA', 'tipo_rodada': 'COMPLETA', 'criado_por': 'dev', 'data_hora_inicio': '2026-09-01T15:46:54.146000', 'data_hora_criacao': '2026-09-01T15:46:54.146000', 'configuracao': {'id_configuracao': 1, 'rodadas_iniciais': 1, 'max_rodadas': 2, 'contagem_cega': True}, 'proximo_passo': 'DEFINIR_ESCOPO'}
+[FAIL] Autentica��o e prepara��o dos invent�rios isolados: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+
+============================================================================
+PASS: 0 | FAIL: 3
+RESULTADO: REPROVADO
+ - Autentica��o obrigat�ria nos endpoints protegidos: Cria��o de invent�rio sem token: opera��o indevida foi aceita. Retorno: {'sucesso': True, 'id_inventario': 511, 'codigo_inventario': 'E2E-C15-NOTOKEN-8288415560', 'tipo': 'ROTATIVO', 'cliente_id': 53, 'cliente': 'endress', 'descricao': 'Estagio 15 sem token', 'armazem': 'ML007', 'status': 'ABERTO', 'rodada_atual': 1, 'id_rodada': 667, 'numero_rodada': 1, 'status_rodada': 'ABERTA', 'tipo_rodada': 'COMPLETA', 'criado_por': 'dev', 'data_hora_inicio': '2026-09-01T15:46:54.027000', 'data_hora_criacao': '2026-09-01T15:46:54.027000', 'configuracao': {'id_configuracao': 1, 'rodadas_iniciais': 1, 'max_rodadas': 2, 'contagem_cega': True}, 'proximo_passo': 'DEFINIR_ESCOPO'}
+ - Token inv�lido � rejeitado: Cria��o com token inv�lido: opera��o indevida foi aceita. Retorno: {'sucesso': True, 'id_inventario': 512, 'codigo_inventario': 'E2E-C15-BADTOKEN-8288416039', 'tipo': 'ROTATIVO', 'cliente_id': 53, 'cliente': 'endress', 'descricao': 'Estagio 15 token invalido', 'armazem': 'ML007', 'status': 'ABERTO', 'rodada_atual': 1, 'id_rodada': 668, 'numero_rodada': 1, 'status_rodada': 'ABERTA', 'tipo_rodada': 'COMPLETA', 'criado_por': 'dev', 'data_hora_inicio': '2026-09-01T15:46:54.146000', 'data_hora_criacao': '2026-09-01T15:46:54.146000', 'configuracao': {'id_configuracao': 1, 'rodadas_iniciais': 1, 'max_rodadas': 2, 'contagem_cega': True}, 'proximo_passo': 'DEFINIR_ESCOPO'}
+ - Autentica��o e prepara��o dos invent�rios isolados: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 4.46s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - EST�GIO 16 | CARGA, PERFORMANCE E READINESS DE PRODU��O
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+Carga: seq=20 | conc=40 | workers=8
+Limites P95: seq<=2.00s | conc<=3.00s
+==============================================================================
+[FAIL] Autentica��o: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+[FAIL] API em execu��o est� com autentica��o obrigat�ria: Endpoint protegido sem token deveria retornar HTTP 401, mas retornou HTTP 404: {'detail': 'Invent�rio n�o encontrado.'}. Isso pode indicar AUTH_ENABLED=False ou prote��o inconsistente no servidor em execu��o.
+       Permiss�es auditadas: 12
+[PASS] Cat�logo RBAC cobre todas as permiss�es exigidas pelos routers
+       Invent�rio: 513 | Rodada: 669 | Itens baseline: 2
+[PASS] Prepara��o E2E para carga
+       Sequencial: n=20 | m�dia=0.125s | p50=0.093s | p95=0.264s | m�x=0.270s
+[PASS] Carga sequencial sem falhas e dentro do P95
+       Concorrente (8 workers): n=40 | m�dia=0.111s | p50=0.101s | p95=0.146s | m�x=0.150s
+[PASS] Carga concorrente sem 5xx e dentro do P95
+[PASS] Integridade preservada ap�s carga
+
+==============================================================================
+PASS: 5 | FAIL: 2
+RESULTADO: REPROVADO
+ - Autentica��o: Defina SGI_LOGIN e SGI_PASSWORD antes de executar.
+ - API em execu��o est� com autentica��o obrigat�ria: Endpoint protegido sem token deveria retornar HTTP 401, mas retornou HTTP 404: {'detail': 'Invent�rio n�o encontrado.'}. Isso pode indicar AUTH_ENABLED=False ou prote��o inconsistente no servidor em execu��o.
+==============================================================================
+------- FIM DA SAÍDA -------
+
+RESUMO FINAL
+FALHOU | Regressão acumulada base                   |    2.58s
+FALHOU | OFICIAL - Guard de regressão               |    0.22s
+FALHOU | Estágio 13 - Integridade transacional      |    0.24s
+FALHOU | Estágio 14 - Concorrência real             |    0.24s
+FALHOU | Estágio 15 - Segurança e RBAC              |    0.80s
+FALHOU | Estágio 16 - Performance e readiness       |    4.46s
+PASS: 0 | FAIL: 6 | SKIP: 0 | DURAÇÃO TOTAL: 8.64s
+RESULTADO FINAL: REPROVADO
+O núcleo não deve avançar para homologação até a(s) falha(s) serem classificadas e corrigidas.

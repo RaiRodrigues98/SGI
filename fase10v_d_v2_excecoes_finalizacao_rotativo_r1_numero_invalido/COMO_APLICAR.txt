@@ -1,0 +1,76 @@
+FASE 10V-D v2 — CORREÇÃO DO INSTALADOR
+==========================================
+
+NÃO USE:
+fase10v_d_excecoes_finalizacao_rotativo_r1_numero_invalido
+
+USE ESTA V2:
+fase10v_d_v2_excecoes_finalizacao_rotativo_r1_numero_invalido
+
+Motivo da correção
+------------------
+A v1 exigia que estes textos aparecessem diretamente no service:
+- SessoesContagem
+- DecisoesRotativo
+- OcorrenciasDivergencia
+
+Isso era rígido demais para a arquitetura refatorada.
+Essas consultas podem estar em repositories/helpers.
+
+A v2 NÃO depende desses detalhes.
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+_encerrar_inventario_rotativo_apos_r1_sem_recontagem()
+
+HTTP 400:
+"Encerramento ROTATIVO pela R1 disponível somente
+para a primeira rodada."
+
+-> BusinessRuleViolation
+
+Pré-requisitos semânticos:
+10V-A = BusinessRuleViolation
+10V-B = BusinessRuleViolation
+10V-C = BusinessRuleViolation
+
+Estado informado antes desta correção:
+10V-B: MIGRADO, http_total=5
+10V-C: MIGRADO, http_total=5
+
+Portanto a 10V-D deve encontrar o alvo dentro desses 5 raises.
+
+Proteções:
+- alvo exato por AST/detail;
+- HTTP total cai exatamente em 1;
+- SQL existente idêntico;
+- chamadas de negócio/repository/helper idênticas;
+- UoW/commit/rollback/conexão idênticos;
+- backup + auto-restore;
+- nenhum router alterado.
+
+Aplicar:
+python .\fase10v_d_v2_excecoes_finalizacao_rotativo_r1_numero_invalido\aplicar_fase10v_d_v2.py
+
+Após sucesso:
+esperado no próprio módulo:
+HTTPException 5 -> 4
+
+Mapa global esperado:
+HTTP imports          : 9
+HTTPException raises  : 123 -> 122? ATENÇÃO:
+Use o valor REAL da auditoria atual para comparar.
+
+Como 10V-B e 10V-C já estavam MIGRADO quando foram reexecutadas,
+elas NÃO reduziram novamente o contador. A referência válida é
+sempre a última auditoria global efetivamente executada.
+
+Depois:
+1. reinicie a API
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+IMPORTANTE:
+Não execute a 10V-E v1 já gerada.
+Ela herdou a mesma suposição rígida da 10V-D v1.
+Depois da 10V-D v2, deve ser usada uma 10V-E v2 adaptativa.

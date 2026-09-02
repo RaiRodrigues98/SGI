@@ -1,0 +1,1478 @@
+from fastapi import HTTPException
+
+
+# ============================================================
+# ANÁLISE GERENCIAL DO INVENTÁRIO OFICIAL
+#
+# Objetivo:
+# Consolidar o histórico completo por:
+#
+# Código + Lote
+#
+# A localização NÃO participa da conciliação.
+# É utilizada apenas para rastreabilidade.
+#
+# Também integra as decisões do gestor:
+#
+# ACEITAR_ESTOQUE
+# ACEITAR_CONTAGEM
+# NOVA_RECONTAGEM
+# ============================================================
+
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def _normalizar_texto(valor):
+
+    if valor is None:
+        return ""
+
+    return str(valor).strip()
+
+
+def _normalizar_lote(valor):
+
+    return _normalizar_texto(valor)
+
+
+# ============================================================
+# STATUS QUANTITATIVO
+# ============================================================
+
+def _calcular_status(
+    qtd_estoque: float,
+    qtd_contada: float
+):
+
+    if (
+        qtd_estoque == 0
+        and
+        qtd_contada > 0
+    ):
+        return "SOBRA"
+
+    if (
+        qtd_estoque > 0
+        and
+        qtd_contada == 0
+    ):
+        return "FALTA"
+
+    if qtd_estoque == qtd_contada:
+        return "OK"
+
+    return "DIVERGÊNCIA"
+
+
+# ============================================================
+# BUSCAR RODADAS DO INVENTÁRIO
+# ============================================================
+
+def _buscar_rodadas(
+    cursor,
+    id_inventario: int
+):
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Rodada,
+            NumeroRodada,
+            Status,
+            DataHoraInicio
+
+        FROM dbo.RodadasInventario
+
+        WHERE ID_Inventario = ?
+
+        ORDER BY
+            NumeroRodada
+        """,
+        id_inventario
+    )
+
+    linhas = cursor.fetchall()
+
+    return [
+        {
+            "id_rodada":
+                linha.ID_Rodada,
+
+            "numero_rodada":
+                linha.NumeroRodada,
+
+            "status":
+                linha.Status,
+
+            "data_hora_inicio":
+                linha.DataHoraInicio
+        }
+        for linha in linhas
+    ]
+
+
+# ============================================================
+# BUSCAR LOCALIZAÇÕES DE UM ITEM EM UMA RODADA
+# ============================================================
+
+def _buscar_localizacoes_item(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    codigo: str,
+    lote: str
+):
+
+    cursor.execute(
+        """
+        SELECT
+            UPPER(
+                LTRIM(
+                    RTRIM(S.Localizacao)
+                )
+            ) AS Localizacao,
+
+            SUM(
+                C.Quantidade
+            ) AS Quantidade
+
+        FROM dbo.Contagens C
+
+        INNER JOIN dbo.SessoesContagem S
+            ON S.ID_Sessao =
+               C.ID_Sessao
+
+        WHERE
+            S.ID_Inventario = ?
+            AND S.ID_Rodada = ?
+            AND S.ValidaParaConsolidacao = 1
+            AND C.Status = 'ATIVA'
+
+            AND LTRIM(
+                RTRIM(C.Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(C.Lote)
+                ),
+                ''
+            ) = ?
+
+        GROUP BY
+            UPPER(
+                LTRIM(
+                    RTRIM(S.Localizacao)
+                )
+            )
+
+        ORDER BY
+            UPPER(
+                LTRIM(
+                    RTRIM(S.Localizacao)
+                )
+            )
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            codigo,
+            lote
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    return [
+        {
+            "localizacao":
+                linha.Localizacao,
+
+            "quantidade":
+                float(
+                    linha.Quantidade
+                )
+        }
+        for linha in linhas
+    ]
+
+
+# ============================================================
+# BUSCAR LOCALIZAÇÕES DO SNAPSHOT
+# ============================================================
+
+def _buscar_localizacoes_snapshot(
+    cursor,
+    id_inventario: int,
+    codigo: str,
+    lote: str
+):
+
+    cursor.execute(
+        """
+        SELECT
+            UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            ) AS Localizacao,
+
+            SUM(
+                SaldoInventario
+            ) AS Quantidade
+
+        FROM dbo.InventarioEstoqueSnapshot
+
+        WHERE
+            ID_Inventario = ?
+
+            AND LTRIM(
+                RTRIM(Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(Lote)
+                ),
+                ''
+            ) = ?
+
+        GROUP BY
+            UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            )
+
+        ORDER BY
+            UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            )
+        """,
+        (
+            id_inventario,
+            codigo,
+            lote
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    return [
+        {
+            "localizacao":
+                linha.Localizacao,
+
+            "quantidade":
+                float(
+                    linha.Quantidade
+                )
+        }
+        for linha in linhas
+    ]
+
+
+# ============================================================
+# VERIFICA SE ITEM PARTICIPOU DE UMA RODADA
+# ============================================================
+
+def _item_participou_rodada(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    numero_rodada: int,
+    codigo: str,
+    lote: str
+):
+
+    # ========================================================
+    # R1 / R2
+    #
+    # Um item do universo oficial só deve ser tratado como
+    # participante quando a rodada estiver operacionalmente
+    # concluída. Isso evita interpretar ausência temporária
+    # de contagem como FALTA enquanto a rodada ainda ocorre.
+    #
+    # Itens efetivamente bipados continuam sendo reconhecidos
+    # mesmo antes da conclusão, inclusive sobras físicas.
+    # ========================================================
+
+    if numero_rodada <= 2:
+
+        cursor.execute(
+            """
+            SELECT TOP 1
+                Status
+
+            FROM dbo.RodadasInventario
+
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+            """,
+            (
+                id_inventario,
+                id_rodada
+            )
+        )
+
+        rodada = cursor.fetchone()
+
+        status_rodada = (
+            str(rodada.Status).strip().upper()
+            if rodada and rodada.Status is not None
+            else ""
+        )
+
+        if status_rodada == "FINALIZADA":
+            return True
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM dbo.Contagens C
+
+            INNER JOIN dbo.SessoesContagem S
+                ON S.ID_Sessao =
+                   C.ID_Sessao
+
+            WHERE
+                S.ID_Inventario = ?
+                AND S.ID_Rodada = ?
+                AND S.ValidaParaConsolidacao = 1
+                AND C.Status = 'ATIVA'
+
+                AND LTRIM(
+                    RTRIM(C.Codigo)
+                ) = ?
+
+                AND ISNULL(
+                    LTRIM(
+                        RTRIM(C.Lote)
+                    ),
+                    ''
+                ) = ?
+            """,
+            (
+                id_inventario,
+                id_rodada,
+                codigo,
+                lote
+            )
+        )
+
+        return (
+            cursor.fetchone()[0] > 0
+        )
+
+    # ========================================================
+    # R3+
+    #
+    # Participa quando foi explicitamente incluído na rodada
+    # ou quando apareceu fisicamente durante a contagem.
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+
+        FROM dbo.RodadaItens
+
+        WHERE ID_Inventario = ?
+          AND ID_Rodada = ?
+
+          AND LTRIM(
+                RTRIM(Codigo)
+              ) = ?
+
+          AND ISNULL(
+                LTRIM(
+                    RTRIM(Lote)
+                ),
+                ''
+              ) = ?
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            codigo,
+            lote
+        )
+    )
+
+    em_rodada_itens = (
+        cursor.fetchone()[0] > 0
+    )
+
+    if em_rodada_itens:
+        return True
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+
+        FROM dbo.Contagens C
+
+        INNER JOIN dbo.SessoesContagem S
+            ON S.ID_Sessao =
+               C.ID_Sessao
+
+        WHERE
+            S.ID_Inventario = ?
+            AND S.ID_Rodada = ?
+            AND S.ValidaParaConsolidacao = 1
+            AND C.Status = 'ATIVA'
+
+            AND LTRIM(
+                RTRIM(C.Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(C.Lote)
+                ),
+                ''
+            ) = ?
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            codigo,
+            lote
+        )
+    )
+
+    encontrado = (
+        cursor.fetchone()[0] > 0
+    )
+
+    return encontrado
+
+
+# ============================================================
+# BUSCAR QUANTIDADE CONTADA NA RODADA
+# ============================================================
+
+def _buscar_quantidade_rodada(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    codigo: str,
+    lote: str
+):
+
+    cursor.execute(
+        """
+        SELECT
+            ISNULL(
+                SUM(C.Quantidade),
+                0
+            ) AS Quantidade
+
+        FROM dbo.Contagens C
+
+        INNER JOIN dbo.SessoesContagem S
+            ON S.ID_Sessao =
+               C.ID_Sessao
+
+        WHERE
+            S.ID_Inventario = ?
+            AND S.ID_Rodada = ?
+            AND S.ValidaParaConsolidacao = 1
+            AND C.Status = 'ATIVA'
+
+            AND LTRIM(
+                RTRIM(C.Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(C.Lote)
+                ),
+                ''
+            ) = ?
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            codigo,
+            lote
+        )
+    )
+
+    linha = cursor.fetchone()
+
+    return float(
+        linha.Quantidade
+        if linha
+        else 0
+    )
+
+
+# ============================================================
+# BUSCAR DECISÃO ATIVA DO GESTOR
+# ============================================================
+
+def _buscar_decisao_gestor(
+    cursor,
+    id_inventario: int,
+    codigo: str,
+    lote: str
+):
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Decisao,
+            Decisao,
+            QuantidadeAprovada,
+            Justificativa,
+            Usuario,
+            DataHora,
+            Status
+
+        FROM dbo.DecisoesGestorInventario
+
+        WHERE
+            ID_Inventario = ?
+            AND Codigo = ?
+            AND Lote = ?
+            AND Status = 'ATIVA'
+
+        ORDER BY
+            ID_Decisao DESC
+        """,
+        (
+            id_inventario,
+            codigo,
+            lote
+        )
+    )
+
+    decisao = cursor.fetchone()
+
+    if not decisao:
+
+        return {
+            "possui_decisao": False,
+            "id_decisao": None,
+            "decisao": None,
+            "quantidade_aprovada": None,
+            "justificativa": None,
+            "usuario": None,
+            "data_hora": None,
+            "status": None
+        }
+
+    return {
+        "possui_decisao": True,
+
+        "id_decisao":
+            decisao.ID_Decisao,
+
+        "decisao":
+            decisao.Decisao,
+
+        "quantidade_aprovada":
+            (
+                float(
+                    decisao.QuantidadeAprovada
+                )
+                if decisao.QuantidadeAprovada
+                is not None
+                else None
+            ),
+
+        "justificativa":
+            decisao.Justificativa,
+
+        "usuario":
+            decisao.Usuario,
+
+        "data_hora":
+            decisao.DataHora,
+
+        "status":
+            decisao.Status
+    }
+
+
+# ============================================================
+# ANALISAR INVENTÁRIO PARA O GESTOR
+# ============================================================
+
+def analisar_inventario_gestor(
+    cursor,
+    id_inventario: int
+):
+
+    # ========================================================
+    # 1. INVENTÁRIO
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Inventario,
+            CodigoInventario,
+            Tipo,
+            ClienteId,
+            RodadaAtual,
+            Status
+
+        FROM dbo.Inventarios
+
+        WHERE ID_Inventario = ?
+        """,
+        id_inventario
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Inventário não encontrado."
+        )
+
+    tipo = (
+        str(
+            inventario.Tipo
+        )
+        .strip()
+        .upper()
+    )
+
+    if tipo != "OFICIAL":
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Análise gerencial disponível "
+                "somente para inventário OFICIAL."
+            )
+        )
+
+    # ========================================================
+    # 2. RODADAS
+    # ========================================================
+
+    rodadas = _buscar_rodadas(
+        cursor=cursor,
+        id_inventario=id_inventario
+    )
+
+    if not rodadas:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "O inventário ainda não possui "
+                "rodadas cadastradas."
+            )
+        )
+
+    # ========================================================
+    # 3. UNIVERSO COMPLETO
+    # ========================================================
+
+    cursor.execute(
+        """
+        WITH Snapshot AS
+        (
+            SELECT
+                LTRIM(
+                    RTRIM(Codigo)
+                ) AS Codigo,
+
+                ISNULL(
+                    LTRIM(
+                        RTRIM(Lote)
+                    ),
+                    ''
+                ) AS Lote,
+
+                MAX(
+                    Descricao
+                ) AS Descricao,
+
+                MAX(
+                    Unidade
+                ) AS Unidade,
+
+                MAX(
+                    Categoria
+                ) AS Categoria,
+
+                SUM(
+                    SaldoInventario
+                ) AS QtdEstoque
+
+            FROM dbo.InventarioEstoqueSnapshot
+
+            WHERE ID_Inventario = ?
+
+            GROUP BY
+                LTRIM(
+                    RTRIM(Codigo)
+                ),
+
+                ISNULL(
+                    LTRIM(
+                        RTRIM(Lote)
+                    ),
+                    ''
+                )
+        ),
+
+        Contados AS
+        (
+            SELECT
+                LTRIM(
+                    RTRIM(C.Codigo)
+                ) AS Codigo,
+
+                ISNULL(
+                    LTRIM(
+                        RTRIM(C.Lote)
+                    ),
+                    ''
+                ) AS Lote
+
+            FROM dbo.Contagens C
+
+            INNER JOIN dbo.SessoesContagem S
+                ON S.ID_Sessao =
+                   C.ID_Sessao
+
+            WHERE
+                S.ID_Inventario = ?
+                AND S.ValidaParaConsolidacao = 1
+                AND C.Status = 'ATIVA'
+
+            GROUP BY
+                LTRIM(
+                    RTRIM(C.Codigo)
+                ),
+
+                ISNULL(
+                    LTRIM(
+                        RTRIM(C.Lote)
+                    ),
+                    ''
+                )
+        ),
+
+        Universo AS
+        (
+            SELECT
+                Codigo,
+                Lote
+            FROM Snapshot
+
+            UNION
+
+            SELECT
+                Codigo,
+                Lote
+            FROM Contados
+        )
+
+        SELECT
+            U.Codigo,
+            U.Lote,
+
+            S.Descricao,
+            S.Unidade,
+            S.Categoria,
+
+            ISNULL(
+                S.QtdEstoque,
+                0
+            ) AS QtdEstoque
+
+        FROM Universo U
+
+        LEFT JOIN Snapshot S
+            ON S.Codigo = U.Codigo
+           AND S.Lote = U.Lote
+
+        ORDER BY
+            U.Codigo,
+            U.Lote
+        """,
+        (
+            id_inventario,
+            id_inventario
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    itens = []
+
+    # ========================================================
+    # 4. ITEM A ITEM
+    # ========================================================
+
+    for linha in linhas:
+
+        codigo = _normalizar_texto(
+            linha.Codigo
+        )
+
+        lote = _normalizar_lote(
+            linha.Lote
+        )
+
+        qtd_estoque = float(
+            linha.QtdEstoque
+        )
+
+        historico = []
+
+        ultima_rodada_participada = None
+        ultimo_status = None
+        ultima_quantidade = None
+
+        # ====================================================
+        # LOCALIZAÇÕES DO SNAPSHOT
+        # ====================================================
+
+        localizacoes_snapshot = (
+            _buscar_localizacoes_snapshot(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                codigo=codigo,
+                lote=lote
+            )
+        )
+
+        # ====================================================
+        # HISTÓRICO POR RODADA
+        # ====================================================
+
+        for rodada in rodadas:
+
+            id_rodada = (
+                rodada["id_rodada"]
+            )
+
+            numero_rodada = (
+                rodada["numero_rodada"]
+            )
+
+            participou = (
+                _item_participou_rodada(
+                    cursor=cursor,
+                    id_inventario=id_inventario,
+                    id_rodada=id_rodada,
+                    numero_rodada=numero_rodada,
+                    codigo=codigo,
+                    lote=lote
+                )
+            )
+
+            if not participou:
+
+                historico.append(
+                    {
+                        "numero_rodada":
+                            numero_rodada,
+
+                        "id_rodada":
+                            id_rodada,
+
+                        "participou":
+                            False,
+
+                        "quantidade":
+                            None,
+
+                        "diferenca":
+                            None,
+
+                        "status":
+                            "NAO_PARTICIPOU",
+
+                        "localizacoes_bipadas":
+                            []
+                    }
+                )
+
+                continue
+
+            qtd_contada = (
+                _buscar_quantidade_rodada(
+                    cursor=cursor,
+                    id_inventario=id_inventario,
+                    id_rodada=id_rodada,
+                    codigo=codigo,
+                    lote=lote
+                )
+            )
+
+            diferenca = (
+                qtd_contada
+                -
+                qtd_estoque
+            )
+
+            status = _calcular_status(
+                qtd_estoque=qtd_estoque,
+                qtd_contada=qtd_contada
+            )
+
+            localizacoes_bipadas = (
+                _buscar_localizacoes_item(
+                    cursor=cursor,
+                    id_inventario=id_inventario,
+                    id_rodada=id_rodada,
+                    codigo=codigo,
+                    lote=lote
+                )
+            )
+
+            historico.append(
+                {
+                    "numero_rodada":
+                        numero_rodada,
+
+                    "id_rodada":
+                        id_rodada,
+
+                    "participou":
+                        True,
+
+                    "quantidade":
+                        qtd_contada,
+
+                    "diferenca":
+                        diferenca,
+
+                    "status":
+                        status,
+
+                    "localizacoes_bipadas":
+                        localizacoes_bipadas
+                }
+            )
+
+            ultima_rodada_participada = (
+                numero_rodada
+            )
+
+            ultimo_status = status
+
+            ultima_quantidade = (
+                qtd_contada
+            )
+
+        # ====================================================
+        # SITUAÇÃO QUANTITATIVA ATUAL
+        # ====================================================
+
+        if ultima_rodada_participada is None:
+
+            situacao_atual = (
+                "SEM_CONTAGEM"
+            )
+
+            requer_decisao_gestor = (
+                True
+            )
+
+        elif ultimo_status == "OK":
+
+            situacao_atual = "OK"
+
+            requer_decisao_gestor = (
+                False
+            )
+
+        else:
+
+            situacao_atual = (
+                ultimo_status
+            )
+
+            requer_decisao_gestor = (
+                True
+            )
+
+        # ====================================================
+        # DECISÃO ATIVA DO GESTOR
+        # ====================================================
+
+        decisao_gestor = (
+            _buscar_decisao_gestor(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                codigo=codigo,
+                lote=lote
+            )
+        )
+
+        # ====================================================
+        # SITUAÇÃO GERENCIAL
+        #
+        # A decisão não altera a situação física.
+        #
+        # Exemplo:
+        #
+        # situacao_atual = FALTA
+        # decisao = ACEITAR_CONTAGEM
+        #
+        # situação física continua FALTA
+        # situação gerencial passa a RESOLVIDO_CONTAGEM
+        # ====================================================
+
+        situacao_gerencial = None
+
+        resolvido_gestor = False
+
+        pendente_decisao_gestor = False
+
+        nova_recontagem = False
+
+        if not requer_decisao_gestor:
+
+            situacao_gerencial = (
+                "NAO_NECESSITA_DECISAO"
+            )
+
+            resolvido_gestor = True
+
+        else:
+
+            if not decisao_gestor["possui_decisao"]:
+
+                situacao_gerencial = (
+                    "AGUARDANDO_DECISAO"
+                )
+
+                pendente_decisao_gestor = (
+                    True
+                )
+
+            elif (
+                decisao_gestor["decisao"]
+                == "ACEITAR_ESTOQUE"
+            ):
+
+                situacao_gerencial = (
+                    "RESOLVIDO_ESTOQUE"
+                )
+
+                resolvido_gestor = True
+
+            elif (
+                decisao_gestor["decisao"]
+                == "ACEITAR_CONTAGEM"
+            ):
+
+                situacao_gerencial = (
+                    "RESOLVIDO_CONTAGEM"
+                )
+
+                resolvido_gestor = True
+
+            elif (
+                decisao_gestor["decisao"]
+                == "NOVA_RECONTAGEM"
+            ):
+
+                situacao_gerencial = (
+                    "NOVA_RECONTAGEM"
+                )
+
+                nova_recontagem = True
+
+            else:
+
+                situacao_gerencial = (
+                    "DECISAO_DESCONHECIDA"
+                )
+
+                pendente_decisao_gestor = (
+                    True
+                )
+
+        # ====================================================
+        # QUANTIDADE FINAL GERENCIAL
+        #
+        # Neste momento:
+        #
+        # OK
+        # → usa última quantidade contada
+        #
+        # ACEITAR_ESTOQUE
+        # → usa quantidade aprovada = snapshot
+        #
+        # ACEITAR_CONTAGEM
+        # → usa quantidade aprovada pelo gestor
+        #
+        # NOVA_RECONTAGEM / SEM DECISÃO
+        # → ainda não possui quantidade final
+        # ====================================================
+
+        quantidade_final_gerencial = None
+
+        if (
+            situacao_gerencial
+            == "NAO_NECESSITA_DECISAO"
+        ):
+
+            quantidade_final_gerencial = (
+                ultima_quantidade
+            )
+
+        elif (
+            situacao_gerencial
+            in (
+                "RESOLVIDO_ESTOQUE",
+                "RESOLVIDO_CONTAGEM",
+            )
+        ):
+
+            quantidade_final_gerencial = (
+                decisao_gestor[
+                    "quantidade_aprovada"
+                ]
+            )
+
+        # ====================================================
+        # ITEM
+        # ====================================================
+
+        itens.append(
+            {
+                "chave":
+                    f"{codigo}|{lote}",
+
+                "codigo":
+                    codigo,
+
+                "lote":
+                    lote,
+
+                "descricao":
+                    linha.Descricao,
+
+                "unidade":
+                    linha.Unidade,
+
+                "categoria":
+                    linha.Categoria,
+
+                "qtd_estoque":
+                    qtd_estoque,
+
+                "localizacoes_snapshot":
+                    localizacoes_snapshot,
+
+                "ultima_rodada_participada":
+                    ultima_rodada_participada,
+
+                "ultima_quantidade_contada":
+                    ultima_quantidade,
+
+                "situacao_atual":
+                    situacao_atual,
+
+                "requer_decisao_gestor":
+                    requer_decisao_gestor,
+
+                "decisao_gestor":
+                    decisao_gestor,
+
+                "situacao_gerencial":
+                    situacao_gerencial,
+
+                "resolvido_gestor":
+                    resolvido_gestor,
+
+                "pendente_decisao_gestor":
+                    pendente_decisao_gestor,
+
+                "nova_recontagem":
+                    nova_recontagem,
+
+                "quantidade_final_gerencial":
+                    quantidade_final_gerencial,
+
+                "historico":
+                    historico
+            }
+        )
+
+    # ========================================================
+    # 5. RESUMO QUANTITATIVO
+    # ========================================================
+
+    total_itens = len(
+        itens
+    )
+
+    total_ok = sum(
+        1
+        for item in itens
+        if item["situacao_atual"] == "OK"
+    )
+
+    total_divergencia = sum(
+        1
+        for item in itens
+        if (
+            item["situacao_atual"]
+            == "DIVERGÊNCIA"
+        )
+    )
+
+    total_falta = sum(
+        1
+        for item in itens
+        if item["situacao_atual"] == "FALTA"
+    )
+
+    total_sobra = sum(
+        1
+        for item in itens
+        if item["situacao_atual"] == "SOBRA"
+    )
+
+    total_sem_contagem = sum(
+        1
+        for item in itens
+        if (
+            item["situacao_atual"]
+            == "SEM_CONTAGEM"
+        )
+    )
+
+    total_decisao_gestor = sum(
+        1
+        for item in itens
+        if item["requer_decisao_gestor"]
+    )
+
+    # ========================================================
+    # 6. RESUMO DAS DECISÕES
+    # ========================================================
+
+    itens_sem_decisao = sum(
+        1
+        for item in itens
+        if item["pendente_decisao_gestor"]
+    )
+
+    aceitaram_estoque = sum(
+        1
+        for item in itens
+        if (
+            item["decisao_gestor"]["decisao"]
+            == "ACEITAR_ESTOQUE"
+        )
+    )
+
+    aceitaram_contagem = sum(
+        1
+        for item in itens
+        if (
+            item["decisao_gestor"]["decisao"]
+            == "ACEITAR_CONTAGEM"
+        )
+    )
+
+    nova_recontagem_total = sum(
+        1
+        for item in itens
+        if item["nova_recontagem"]
+    )
+
+    itens_resolvidos_gestor = sum(
+        1
+        for item in itens
+        if (
+            item["requer_decisao_gestor"]
+            and
+            item["resolvido_gestor"]
+        )
+    )
+
+    itens_resolvidos_total = sum(
+        1
+        for item in itens
+        if item["resolvido_gestor"]
+    )
+
+    # ========================================================
+    # STATUS OPERACIONAL DAS RODADAS
+    #
+    # A análise gerencial não pode liberar a finalização
+    # enquanto existir rodada ainda não finalizada.
+    # ========================================================
+
+    rodadas_nao_finalizadas = [
+        rodada
+        for rodada in rodadas
+        if (
+            str(
+                rodada.get("status") or ""
+            )
+            .strip()
+            .upper()
+            != "FINALIZADA"
+        )
+    ]
+
+    total_rodadas_nao_finalizadas = len(
+        rodadas_nao_finalizadas
+    )
+
+    operacao_concluida = (
+        total_rodadas_nao_finalizadas == 0
+    )
+
+    # ========================================================
+    # 7. PODE FINALIZAR?
+    #
+    # Para finalização:
+    #
+    # - não pode existir item sem decisão
+    # - não pode existir NOVA_RECONTAGEM
+    # ========================================================
+
+    pode_finalizar_inventario = (
+        itens_sem_decisao == 0
+        and
+        nova_recontagem_total == 0
+    )
+
+    # ========================================================
+    # 8. PODE GERAR NOVA RECONTAGEM?
+    # ========================================================
+
+    pode_gerar_nova_recontagem = (
+        nova_recontagem_total > 0
+    )
+
+    # ========================================================
+    # 9. RODADA MAIS RECENTE
+    # ========================================================
+
+    ultima_rodada = max(
+        rodada["numero_rodada"]
+        for rodada in rodadas
+    )
+
+    # ========================================================
+    # 10. RETORNO
+    # ========================================================
+
+    return {
+
+        "tipo_analise":
+            "GERENCIAL_OFICIAL",
+
+        "id_inventario":
+            inventario.ID_Inventario,
+
+        "codigo_inventario":
+            inventario.CodigoInventario,
+
+        "cliente_id":
+            inventario.ClienteId,
+
+        "status_inventario":
+            inventario.Status,
+
+        "rodada_atual":
+            inventario.RodadaAtual,
+
+        "ultima_rodada_existente":
+            ultima_rodada,
+
+        "regra_conciliacao":
+            "CODIGO_LOTE",
+
+        "considera_localizacao":
+            False,
+
+        # ====================================================
+        # SITUAÇÃO PARA AÇÕES DO GESTOR
+        # ====================================================
+
+        "pode_finalizar_inventario":
+            pode_finalizar_inventario,
+
+        "pode_gerar_nova_recontagem":
+            pode_gerar_nova_recontagem,
+
+        "operacao_concluida":
+            operacao_concluida,
+
+        "rodadas_nao_finalizadas":
+            rodadas_nao_finalizadas,
+
+        # ====================================================
+        # RESUMO
+        # ====================================================
+
+        "resumo": {
+
+            "total_itens":
+                total_itens,
+
+            "ok":
+                total_ok,
+
+            "divergencias":
+                total_divergencia,
+
+            "faltas":
+                total_falta,
+
+            "sobras":
+                total_sobra,
+
+            "sem_contagem":
+                total_sem_contagem,
+
+            "itens_para_decisao_gestor":
+                total_decisao_gestor,
+
+            "itens_sem_decisao":
+                itens_sem_decisao,
+
+            "aceitaram_estoque":
+                aceitaram_estoque,
+
+            "aceitaram_contagem":
+                aceitaram_contagem,
+
+            "nova_recontagem":
+                nova_recontagem_total,
+
+            "itens_resolvidos_gestor":
+                itens_resolvidos_gestor,
+
+            "itens_resolvidos_total":
+                itens_resolvidos_total,
+
+            "rodadas_nao_finalizadas":
+                total_rodadas_nao_finalizadas
+        },
+
+        "rodadas":
+            rodadas,
+
+        "itens":
+            itens
+    }

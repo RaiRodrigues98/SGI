@@ -1,0 +1,122 @@
+FASE 9G - UOW EM CICLOS E COBERTURA ROTATIVO
+================================================
+
+Arquivos alterados
+------------------
+routers\rotativo_ciclos.py
+routers\rotativo_cobertura.py
+
+Decisão arquitetural
+--------------------
+NESTA FASE O UOW É APENAS ADAPTADOR DE CONEXÃO.
+
+Não movemos commit/rollback dos services para o router.
+
+Motivo
+------
+Os routers apenas fazem:
+
+get_connection()
+cursor = conn.cursor()
+
+service(
+    conn=conn,
+    cursor=cursor
+)
+
+close()
+
+Os services são donos da transação.
+
+Ciclos
+------
+abrir_ciclo_rotativo() possui commit/rollback no service.
+
+O router:
+POST /rotativo/ciclos
+continua sem commit/rollback próprio.
+
+GET /rotativo/ciclos/atual
+continua somente leitura.
+
+Se a versão atual possuir:
+POST /rotativo/ciclos/{id_ciclo}/finalizar
+ela também continua recebendo conn/cursor pelo UoW,
+sem introduzir commit no router.
+
+Cobertura
+---------
+registrar_conclusao_localizacao_rotativo() possui:
+
+operação de cobertura
+↓
+conn.commit()
+↓
+em falha operacional: conn.rollback()
+↓
+inteligência pós-conclusão
+
+A inteligência é executada SOMENTE depois do commit operacional.
+
+Falha analítica não deve desfazer a conclusão operacional.
+
+A Fase 9G preserva exatamente esse desenho.
+
+Depois
+------
+Router:
+
+uow = SqlServerUnitOfWork()
+uow.open()
+
+conn = uow.connection
+cursor = uow.cursor
+
+service(
+    conn=conn,
+    cursor=cursor
+)
+
+uow.close()
+
+IMPORTANTE:
+não existe uow.commit() nem uow.rollback() nesses routers.
+
+Instalador
+----------
+Idempotente:
+
+LEGADO
+  -> migra e cria backup
+
+UOW
+  -> apenas valida
+
+DESCONHECIDO
+  -> não altera nenhum router
+
+O instalador também valida ANTES da alteração:
+- services/ciclos_rotativo.py possui commit/rollback interno;
+- services/rotativo_cobertura.py possui commit/rollback interno;
+- cobertura confirma operação antes da inteligência pós-conclusão.
+
+Pré-requisito
+-------------
+Fases 9A a 9F aplicadas.
+
+Aplicar
+-------
+python .\fase9g_unit_of_work_ciclos_cobertura\aplicar_fase9g.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Se aprovado, o próximo passo é a AUDITORIA FINAL DA FASE 9:
+procurar qualquer ownership transacional manual remanescente e
+distinguir leitura simples de escrita antes de declarar a Fase 9 fechada.

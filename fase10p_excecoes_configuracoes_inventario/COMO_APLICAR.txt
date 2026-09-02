@@ -1,0 +1,72 @@
+FASE 10P - CONFIGURAÇÕES DO INVENTÁRIO
+========================================
+
+Alvo:
+services\configuracoes_inventario.py
+
+Baseline:
+obter_configuracao_inventario()
+- HTTP 400: Tipo de inventário não informado.
+- HTTP 400: não existe configuração ativa para ClienteId + TipoInventario.
+
+obter_configuracao_por_inventario()
+- HTTP 404: Inventário não encontrado.
+- HTTP 400: inventário sem ClienteId configurado.
+
+Total:
+3 x HTTP 400
+1 x HTTP 404
+
+Mapeamento:
+400 -> BusinessRuleViolation
+404 -> NotFoundError
+
+IMPORTANTE:
+Esse service é compartilhado por várias áreas:
+- contagens
+- rodadas
+- encaminhamento gerencial
+- consultas/configuração
+
+Por isso a 10P NÃO usa lista fixa de consumers.
+
+O instalador:
+1. valida exatamente os quatro raises;
+2. monta grafo cross-module;
+3. resolve imports, aliases e facades/reexports;
+4. inclui callers internos do próprio service;
+5. encontra services intermediários;
+6. encontra todas as funções de router atingidas;
+7. bloqueia wrapper `except Exception -> HTTPException`;
+8. adapta cada fronteira HTTP;
+9. reutiliza BusinessRuleViolation/NotFoundError existentes;
+10. replica rollback/log do except HTTPException;
+11. remove FastAPI do service;
+12. auto-restaura tudo se qualquer validação falhar.
+
+Pré-requisito:
+Fase 10O aplicada.
+
+Aplicar:
+python .\fase10p_excecoes_configuracoes_inventario\aplicar_fase10p.py
+
+Se o grafo encontrar um caminho não seguro, a instalação deve
+ABORTAR. Não contorne o bloqueio: envie a saída para análise.
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado:
+HTTP imports:
+15 -> 14
+
+HTTPException raises:
+150 -> 146
+
+ValueError/RuntimeError:
+69 -> 69
+
+Custom exception types:
+6 -> 6

@@ -1,0 +1,117 @@
+FASE 10U-C - CRIAÇÃO / CONCORRÊNCIA ROTATIVO R1 -> R2
+=======================================================
+
+Alvo:
+services\rodadas\criacao.py
+└── _serializar_criacao_r2_rotativo()
+
+Pré-requisito:
+Fase 10U-B aplicada.
+
+Baseline esperado:
+_carregar_configuracao_criacao
+- 3 BusinessRuleViolation
+
+_validar_sem_sessoes_abertas
+- 1 BusinessRuleViolation
+
+_serializar_criacao_r2_rotativo
+- 1 HTTPException 409
+
+criacao.py:
+- 10 HTTPException restantes
+
+Erro:
+HTTP 409
+"Não foi possível obter exclusividade para criar a R2 do
+inventário ROTATIVO. Tente novamente."
+
+Mapeamento:
+HTTP 409 -> ConflictError
+
+POR QUE É ConflictError:
+A requisição não viola uma regra funcional do inventário.
+Ela não conseguiu adquirir exclusividade transacional para
+uma operação concorrente. A API já expressava isso como 409.
+
+PROTEÇÃO CRÍTICA
+----------------
+O instalador exige e preserva exatamente:
+
+sys.sp_getapplock
+
+Resource:
+SGI:ROTATIVO:PROXIMA_RODADA:
+{ID_Inventario}:{numero_proxima}
+
+LockMode:
+Exclusive
+
+LockOwner:
+Transaction
+
+LockTimeout:
+10000
+
+O application lock continua:
+- somente no fluxo ROTATIVO R1 -> R2;
+- na mesma transação SQL;
+- antes do SELECT de existência;
+- permitindo que a segunda requisição aguarde o commit
+  e depois caia no comportamento idempotente criada=False.
+
+Não altera:
+- fluxo OFICIAL;
+- constraint UQ_RodadasInventario;
+- SQL;
+- ordem applock -> SELECT;
+- UoW;
+- commit;
+- rollback;
+- conexão;
+- retorno criada=False;
+- seleção de candidatos;
+- criação da rodada.
+
+Depois da 10U-C:
+_serializar_criacao_r2_rotativo
+- 0 HTTPException
+- 1 ConflictError
+
+criacao.py:
+- 9 HTTPException restantes
+- FastAPI ainda permanece
+
+Os 9 remanescentes:
+_selecionar_candidatos             7
+_validar_candidatos_divergencia    1
+_gerar_localizacoes_nova_rodada    1
+
+Aplicar:
+python .\fase10u_c_excecoes_criacao_concorrencia_r2\aplicar_fase10u_c.py
+
+VALIDAÇÃO ESPECIAL APÓS APLICAÇÃO:
+1. Reinicie a API.
+2. Rode primeiro o teste de concorrência:
+   python tests_e2e\teste_rotativo_estagio14.py
+3. Depois:
+   python tests_e2e\regressao_final_sgi.py
+4. Finalmente:
+   python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado se 10U-B deixou:
+HTTP imports: 10
+HTTP raises : 135
+
+Após 10U-C:
+HTTP imports: 10
+HTTP raises : 134
+
+O import FastAPI NÃO cai ainda.
+
+Próximo recorte:
+10U-D deverá tratar um dos blocos restantes de criacao.py.
+
+Preferência:
+_validar_candidatos_divergencia()
+antes de atacar os 7 raises de _selecionar_candidatos().

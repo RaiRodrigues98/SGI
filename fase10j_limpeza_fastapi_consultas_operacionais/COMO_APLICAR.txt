@@ -1,0 +1,91 @@
+FASE 10J - FECHAMENTO DE consultas_operacionais
+================================================
+
+Escopo:
+services\consultas_operacionais.py
+
+A auditoria 10A encontrou 13 raises HTTPException nesse service.
+
+Eles foram divididos em:
+10G:
+- consultar_inventario: 1
+- consultar_rodada_atual: 2
+Subtotal: 3
+
+10H:
+- consultar_detalhe_localizacao: 5
+Subtotal acumulado: 8
+
+10I:
+- buscar_produto_contagem: 2
+- validar_lote_contagem: 3
+Subtotal acumulado: 13
+
+Portanto, depois da 10I, o service deve ter:
+- 0 raise HTTPException
+- 0 except HTTPException
+- apenas o import legado:
+  from fastapi import HTTPException
+
+A 10J NÃO migra regra de negócio.
+Ela é uma fase de fechamento/limpeza.
+
+O instalador:
+1. valida os perfis das 5 funções migradas;
+2. audita o arquivo inteiro por AST;
+3. exige zero uso funcional de HTTPException;
+4. exige que o único import FastAPI/Starlette seja
+   exatamente HTTPException;
+5. remove o import;
+6. recompila;
+7. compara o resultado para garantir que nenhuma outra
+   linha funcional foi alterada;
+8. restaura o backup se qualquer validação falhar.
+
+Se ainda existir algum HTTPException fora do import:
+ABORTA SEM ALTERAR.
+
+Não altera:
+- routers\consultas.py
+- SQL
+- get_connection/UoW
+- cursor
+- commit/rollback
+- rotas
+- respostas
+
+Pré-requisito:
+Fase 10I aplicada.
+
+Aplicar:
+python .\fase10j_limpeza_fastapi_consultas_operacionais\aplicar_fase10j.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+python tests_e2e\regressao_final_sgi.py
+
+3. Execute:
+python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado da 10J:
+HTTP imports:
+-1
+
+HTTPException raises:
+0 adicional nesta fase
+
+Acumulado estimado desde a auditoria inicial após 10B–10J:
+HTTP imports:
+27 -> 19
+
+HTTPException raises:
+201 -> 173
+
+ValueError/RuntimeError:
+69 -> 69
+
+Observação:
+A contagem exata da nova auditoria é a autoridade.
+Se divergir dos números estimados, use a saída real da 10A
+para decidir a próxima fase.

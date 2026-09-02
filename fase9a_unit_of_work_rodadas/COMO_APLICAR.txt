@@ -1,0 +1,98 @@
+FASE 9A - UNIT OF WORK DO ROUTER DE RODADAS
+============================================
+
+Pré-requisito
+-------------
+Fase 8D instalada e regressão aprovada.
+
+Novo arquivo
+------------
+infrastructure\database\unit_of_work.py
+
+Classe
+------
+SqlServerUnitOfWork
+
+Ela passa a controlar:
+- get_connection()
+- connection.cursor()
+- connection.commit()
+- connection.rollback()
+- cursor.close()
+- connection.close()
+
+Importante
+----------
+Nesta fase o router AINDA decide quando fazer commit ou rollback.
+
+Antes:
+router
+  -> get_connection()
+  -> cursor()
+  -> service
+  -> conn.commit() / conn.rollback()
+  -> close()
+
+Depois:
+router
+  -> SqlServerUnitOfWork.open()
+  -> uow.cursor
+  -> service
+  -> uow.commit() / uow.rollback()
+  -> uow.close()
+
+Portanto a fronteira da transação NÃO muda.
+
+Isso é especialmente importante porque:
+sp_getapplock
+  @LockOwner = 'Transaction'
+
+continua vivo até o mesmo commit/rollback.
+
+Router alterado
+---------------
+routers\rodadas.py
+
+Rotas preservadas
+-----------------
+POST /inventarios/{id_inventario}/rodadas/proxima
+GET  /inventarios/{id_inventario}/comparativo-rodadas
+POST /inventarios/{id_inventario}/rodadas/{id_rodada}/sincronizar-localizacoes
+GET  /inventarios/{id_inventario}/rodadas/{id_rodada}/analise-recontagem
+GET  /inventarios/{id_inventario}/analise-gestor
+GET  /inventarios/{id_inventario}/rodadas/proxima-preview
+
+Permissões preservadas
+----------------------
+RODADA_GERAR
+ANALISE_VISUALIZAR
+
+Não alterado
+------------
+- services de ROTATIVO/OFICIAL
+- repositories
+- SQL de negócio
+- regras
+- contratos HTTP
+- RBAC
+- schemas
+- sp_getapplock
+- momento do commit
+- momento do rollback
+
+Aplicação
+---------
+Na raiz do SGI:
+
+python .\fase9a_unit_of_work_rodadas\aplicar_fase9a.py
+
+Depois:
+1. Reinicie a API.
+2. Rode:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Não avance para a Fase 9B se houver qualquer FAIL.

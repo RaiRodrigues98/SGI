@@ -1,0 +1,95 @@
+FASE 9I - UNIT OF WORK EM ANALISE.PY
+=====================================
+
+Motivo
+------
+A auditoria 9H apontou 3 bloqueadores em routers\analise.py.
+
+Foi confirmado que:
+- não existe SQL de escrita nessas 3 funções;
+- o auditor 9H v1 confundiu cursor.execute() com SQL EXEC/EXECUTE;
+- analisar_rodada possui 2 rollbacks explícitos;
+- nenhuma das 3 funções possui commit.
+
+Nesta fase preservamos comportamento.
+
+Migração
+--------
+analisar_sessao
+  1 conexão -> 1 UoW
+  0 commit
+  0 rollback
+
+analisar_rodada
+  1 conexão -> 1 UoW
+  0 commit
+  2 rollbacks -> preservados como uow.rollback()
+
+consultar_analise_rotativo
+  1 conexão -> 1 UoW
+  0 commit
+  0 rollback
+
+Não removemos os rollbacks agora
+--------------------------------
+Eles são redundantes em uma rota somente SELECT,
+mas removê-los seria uma mudança comportamental.
+
+A Fase 9 trata primeiro ownership/estrutura.
+
+Uma limpeza posterior pode remover rollbacks
+redundantes após testes específicos.
+
+Preservado
+----------
+- ANALISE_VISUALIZAR
+- análise de sessão
+- análise de rodada
+- análise ROTATIVO
+- análise OFICIAL
+- validar_snapshot
+- services atuais
+- endpoints atuais
+- zero commits
+
+Instalador
+----------
+Idempotente:
+LEGADO -> migra
+UOW -> apenas valida
+DESCONHECIDO -> não altera
+
+Testado contra duas versões reais
+---------------------------------
+1. analise(3).py
+   - mesma distribuição/linhas observada na auditoria 9H:
+     analisar_sessao ~84
+     analisar_rodada ~247
+     consultar_analise_rotativo ~434
+
+2. analise.py
+   - variante posterior com mesmas fronteiras transacionais
+
+Aplicar
+-------
+python .\fase9i_unit_of_work_analise\aplicar_fase9i.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+python tests_e2e\regressao_final_sgi.py
+
+IMPORTANTE
+----------
+Ainda NÃO considere a Fase 9 encerrada.
+
+A auditoria 9H v1 também subestimou routers que
+delegam escrita para services:
+
+- rotativo_ciclos.py
+- rotativo_cobertura.py
+- rotativo_fluxo.py
+- rotativo_priorizacao.py
+
+Esses serão tratados no próximo ponto antes
+da auditoria final corrigida.

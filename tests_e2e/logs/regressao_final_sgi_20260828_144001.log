@@ -1,0 +1,176 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260828_144001.log
+[FAIL] Regressão acumulada base (regressao_completa.py) - 131.31s
+       RESULTADO GERAL: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - REGRESS�O COMPLETA DO INVENT�RIO
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Pasta:  C:\Users\rai.sousa\Desktop\SGI\tests_e2e
+Timeout por teste: 600s
+Sa�da completa: SIM
+==============================================================================
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Fluxo E2E
+ARQUIVO:   teste_rotativo_e2e_v2.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Prote��es
+ARQUIVO:   teste_rotativo_protecoes_corrigido.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 3 - Estados limite e consist�ncia
+ARQUIVO:   teste_rotativo_estagio3.py
+==============================================================================
+
+[REPROVADO] EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 4
+ARQUIVO:   teste_rotativo_estagio4.py
+==============================================================================
+
+[REPROVADO] EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 5
+ARQUIVO:   teste_rotativo_estagio5.py
+==============================================================================
+
+[REPROVADO] EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 6
+ARQUIVO:   teste_rotativo_estagio6_corrigido.py
+==============================================================================
+
+[REPROVADO] EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 7
+ARQUIVO:   teste_rotativo_estagio7.py
+==============================================================================
+
+[REPROVADO] EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 8
+ARQUIVO:   teste_rotativo_estagio8.py
+==============================================================================
+
+[REPROVADO] EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 9
+ARQUIVO:   teste_rotativo_estagio9.py
+==============================================================================
+
+[REPROVADO] EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 10 - Regress�o OFICIAL
+ARQUIVO:   teste_oficial_estagio10.py
+==============================================================================
+
+[REPROVADO] EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL
+ARQUIVO:   teste_estagio12_coexistencia.py
+==============================================================================
+
+[REPROVADO] EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+SGI - RESUMO DA REGRESS�O COMPLETA
+==============================================================================
+TESTE                                         STATUS           TEMPO  ARQUIVO
+--------------------------------------------------------------------------------------------------------------
+ROTATIVO - Fluxo E2E                          REPROVADO        14.9s  teste_rotativo_e2e_v2.py
+ROTATIVO - Prote��es                          REPROVADO        19.9s  teste_rotativo_protecoes_corrigido.py
+EST�GIO 3 - Estados limite e consist�ncia     REPROVADO         8.7s  teste_rotativo_estagio3.py
+EST�GIO 4                                     REPROVADO        12.5s  teste_rotativo_estagio4.py
+EST�GIO 5                                     REPROVADO         8.0s  teste_rotativo_estagio5.py
+EST�GIO 6                                     REPROVADO        15.7s  teste_rotativo_estagio6_corrigido.py
+EST�GIO 7                                     REPROVADO        20.3s  teste_rotativo_estagio7.py
+EST�GIO 8                                     REPROVADO        16.1s  teste_rotativo_estagio8.py
+EST�GIO 9                                     REPROVADO         2.5s  teste_rotativo_estagio9.py
+EST�GIO 10 - Regress�o OFICIAL                REPROVADO         5.2s  teste_oficial_estagio10.py
+EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL  REPROVADO         7.5s  teste_estagio12_coexistencia.py
+
+TOTAL PREVISTO: 11
+EXECUTADOS:     11
+APROVADOS:      0
+REPROVADOS:     11
+AUSENTES:       0
+TEMPO TOTAL:    2m 11.1s
+
+RESULTADO GERAL: REPROVADO
+
+FALHAS:
+ - ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+ - ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+==============================================================================
+------- FIM DA SAÍDA -------
+
+[PASS] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 4.99s
+       RESULTADO: APROVADO
+[PASS] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 2.96s
+       RESULTADO: APROVADO
+[FAIL] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 8.97s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+============================================================================
+SGI - EST�GIO 14 | CONCORR�NCIA REAL / MULTIUSU�RIO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+============================================================================
+[PASS] Autentica��o
+[PASS] Concorr�ncia mant�m uma �nica sess�o f�sica por localiza��o/rodada
+[PASS] Contagens simult�neas permanecem consistentes como eventos
+[PASS] Encerramento simult�neo efetiva uma �nica transi��o
+[FAIL] Cria��o concorrente da R2 n�o gera duplicidade: A segunda chamada deve ser idempotente ou explicitamente bloqueada. Retorno: [{'ok': True, 'value': {'sucesso': True, 'id_inventario': 422, 'codigo_inventario': 'E2E-C14-R2-7938945917', 'tipo_inventario': 'ROTATIVO', 'rodada_anterior': 1, 'proxima_rodada': {'criada': True, 'id_rodada': 554, 'numero_rodada': 2, 'status': 'ABERTA', 'data_hora_inicio': '2026-08-28T14:42:26.227000', 'tipo_rodada': 'DIVERGENCIAS', 'rodada_origem': 1, 'rodada_anterior_finalizada': True, 'origem_candidatos': 'DIVERGENCIAS_R1_ROTATIVO', 'itens_gerados': 1, 'localizacoes_geradas': 1, 'localizacoes': ['01PLAQUETA'], 'candidatos': 1, 'configuracao': {'rodadas_iniciais': 1, 'max_rodadas': 2, 'recontagem_por_localizacao': True, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 0}, 'pode_encaminhar_gestor': False}}, 'error': None}, {'ok': False, 'value': None, 'error': ApiError('HTTP 500 POST /inventarios/422/rodadas/proxima: {\'detail\': \'(\\\'23000\\\', "[23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Violation of UNIQUE KEY constraint \\\'UQ_RodadasInventario\\\'. Cannot insert duplicate key in object \\\'dbo.RodadasInventario\\\'. The duplicate key value is (422, 2). (2627) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The statement has been terminated. (3621)")\'}'), 'status': 500}]
+[PASS] Invent�rios distintos permanecem isolados sob concorr�ncia
+
+============================================================================
+PASS: 5 | FAIL: 1
+RESULTADO: REPROVADO
+ - Cria��o concorrente da R2 n�o gera duplicidade: A segunda chamada deve ser idempotente ou explicitamente bloqueada. Retorno: [{'ok': True, 'value': {'sucesso': True, 'id_inventario': 422, 'codigo_inventario': 'E2E-C14-R2-7938945917', 'tipo_inventario': 'ROTATIVO', 'rodada_anterior': 1, 'proxima_rodada': {'criada': True, 'id_rodada': 554, 'numero_rodada': 2, 'status': 'ABERTA', 'data_hora_inicio': '2026-08-28T14:42:26.227000', 'tipo_rodada': 'DIVERGENCIAS', 'rodada_origem': 1, 'rodada_anterior_finalizada': True, 'origem_candidatos': 'DIVERGENCIAS_R1_ROTATIVO', 'itens_gerados': 1, 'localizacoes_geradas': 1, 'localizacoes': ['01PLAQUETA'], 'candidatos': 1, 'configuracao': {'rodadas_iniciais': 1, 'max_rodadas': 2, 'recontagem_por_localizacao': True, 'permitir_gestor_antecipado': True, 'limite_itens_gestor_antecipado': 0}, 'pode_encaminhar_gestor': False}}, 'error': None}, {'ok': False, 'value': None, 'error': ApiError('HTTP 500 POST /inventarios/422/rodadas/proxima: {\'detail\': \'(\\\'23000\\\', "[23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Violation of UNIQUE KEY constraint \\\'UQ_RodadasInventario\\\'. Cannot insert duplicate key in object \\\'dbo.RodadasInventario\\\'. The duplicate key value is (422, 2). (2627) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The statement has been terminated. (3621)")\'}'), 'status': 500}]
+============================================================================
+------- FIM DA SAÍDA -------
+
+[PASS] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 2.45s
+       RESULTADO: APROVADO
+[PASS] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 5.34s
+       RESULTADO: APROVADO
+RESUMO FINAL
+FALHOU | Regressão acumulada base                   |  131.31s
+OK     | OFICIAL - Guard de regressão               |    4.99s
+OK     | Estágio 13 - Integridade transacional      |    2.96s
+FALHOU | Estágio 14 - Concorrência real             |    8.97s
+OK     | Estágio 15 - Segurança e RBAC              |    2.45s
+OK     | Estágio 16 - Performance e readiness       |    5.34s
+PASS: 4 | FAIL: 2 | SKIP: 0 | DURAÇÃO TOTAL: 156.10s
+RESULTADO FINAL: REPROVADO
+O núcleo não deve avançar para homologação até a(s) falha(s) serem classificadas e corrigidas.

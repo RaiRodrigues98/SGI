@@ -1,0 +1,343 @@
+import os
+
+from fastapi import (
+    Depends,
+    HTTPException,
+    status,
+)
+
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
+
+from database import get_connection
+
+from services.auth import (
+    decodificar_token,
+)
+
+from services.usuarios import (
+    listar_perfis_usuario,
+    listar_permissoes_usuario,
+)
+
+
+# ============================================================
+# MODO DE AUTENTICAÇÃO
+#
+# Desenvolvimento:
+# AUTH_ENABLED=false
+#
+# Produção:
+# AUTH_ENABLED=true
+# ============================================================
+
+AUTH_ENABLED = (
+    os.getenv(
+        "AUTH_ENABLED",
+        "true"
+    )
+    .strip()
+    .lower()
+    in (
+        "true",
+        "1",
+        "yes",
+        "sim",
+    )
+)
+
+
+# ============================================================
+# USUÁRIO DE DESENVOLVIMENTO
+#
+# Utilizado somente quando:
+#
+# AUTH_ENABLED=false
+#
+# ATENÇÃO:
+# Nunca utilizar este modo em produção.
+# ============================================================
+
+USUARIO_DESENVOLVIMENTO = {
+    "id_usuario": 0,
+    "nome": "Desenvolvimento",
+    "login": "dev",
+    "email": None,
+    "ativo": True,
+    "ultimo_login": None,
+    "perfis": [
+        {
+            "nome": "DESENVOLVIMENTO"
+        }
+    ],
+    "permissoes": [],
+    "codigos_permissoes": set(),
+}
+
+
+# ============================================================
+# BEARER TOKEN
+# ============================================================
+
+bearer_scheme = HTTPBearer(
+    auto_error=False
+)
+
+
+# ============================================================
+# USUÁRIO AUTENTICADO
+# ============================================================
+
+def obter_usuario_atual(
+    credenciais: HTTPAuthorizationCredentials | None = Depends(
+        bearer_scheme
+    )
+):
+
+    # ========================================================
+    # MODO DESENVOLVIMENTO
+    #
+    # Não exige Bearer Token.
+    # ========================================================
+
+    if not AUTH_ENABLED:
+
+        return USUARIO_DESENVOLVIMENTO.copy()
+
+    # ========================================================
+    # 1. TOKEN AUSENTE
+    # ========================================================
+
+    if credenciais is None:
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticação obrigatória.",
+            headers={
+                "WWW-Authenticate":
+                    "Bearer"
+            }
+        )
+
+    # ========================================================
+    # 2. VALIDA ESQUEMA
+    # ========================================================
+
+    if (
+        credenciais.scheme.lower()
+        != "bearer"
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tipo de autenticação inválido.",
+            headers={
+                "WWW-Authenticate":
+                    "Bearer"
+            }
+        )
+
+    # ========================================================
+    # 3. DECODIFICA JWT
+    # ========================================================
+
+    dados_token = decodificar_token(
+        credenciais.credentials
+    )
+
+    id_usuario = (
+        dados_token["id_usuario"]
+    )
+
+    conn = None
+    cursor = None
+
+    try:
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # ====================================================
+        # 4. BUSCA USUÁRIO
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT
+                ID_Usuario,
+                Nome,
+                Login,
+                Email,
+                Ativo,
+                UltimoLogin
+
+            FROM dbo.Usuarios
+
+            WHERE ID_Usuario = ?
+            """,
+            id_usuario
+        )
+
+        usuario = cursor.fetchone()
+
+        if not usuario:
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuário não encontrado.",
+                headers={
+                    "WWW-Authenticate":
+                        "Bearer"
+                }
+            )
+
+        # ====================================================
+        # 5. USUÁRIO CONTINUA ATIVO?
+        # ====================================================
+
+        if not bool(
+            usuario.Ativo
+        ):
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuário inativo."
+            )
+
+        # ====================================================
+        # 6. PERFIS ATUAIS
+        # ====================================================
+
+        perfis = listar_perfis_usuario(
+            cursor=cursor,
+            id_usuario=id_usuario
+        )
+
+        # ====================================================
+        # 7. PERMISSÕES ATUAIS
+        # ====================================================
+
+        permissoes = listar_permissoes_usuario(
+            cursor=cursor,
+            id_usuario=id_usuario
+        )
+
+        codigos_permissoes = {
+            item["codigo"]
+            for item in permissoes
+        }
+
+        # ====================================================
+        # 8. RETORNO
+        # ====================================================
+
+        return {
+            "id_usuario":
+                usuario.ID_Usuario,
+
+            "nome":
+                usuario.Nome,
+
+            "login":
+                usuario.Login,
+
+            "email":
+                usuario.Email,
+
+            "ativo":
+                bool(
+                    usuario.Ativo
+                ),
+
+            "ultimo_login":
+                usuario.UltimoLogin,
+
+            "perfis":
+                perfis,
+
+            "permissoes":
+                permissoes,
+
+            "codigos_permissoes":
+                codigos_permissoes
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# EXIGIR PERMISSÃO
+# ============================================================
+
+def exigir_permissao(
+    codigo_permissao: str
+):
+
+    codigo_permissao = (
+        str(codigo_permissao)
+        .strip()
+        .upper()
+    )
+
+    if not codigo_permissao:
+
+        raise ValueError(
+            "Código da permissão obrigatório."
+        )
+
+    def verificar(
+        usuario=Depends(
+            obter_usuario_atual
+        )
+    ):
+
+        # ====================================================
+        # MODO DESENVOLVIMENTO
+        #
+        # Libera todas as permissões.
+        # ====================================================
+
+        if not AUTH_ENABLED:
+
+            return usuario
+
+        permissoes = (
+            usuario[
+                "codigos_permissoes"
+            ]
+        )
+
+        if (
+            codigo_permissao
+            not in permissoes
+        ):
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Usuário não possui a permissão "
+                    f"{codigo_permissao}."
+                )
+            )
+
+        return usuario
+
+    return verificar

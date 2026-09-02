@@ -1,0 +1,108 @@
+FASE 10U-E - CRIAÇÃO / LOCALIZAÇÕES DA RECONTAGEM
+====================================================
+
+Alvo:
+services\rodadas\criacao.py
+└── _gerar_localizacoes_nova_rodada()
+
+Pré-requisito:
+Fase 10U-D aplicada.
+
+Baseline esperado após 10U-D:
+
+_carregar_configuracao_criacao
+- 3 BusinessRuleViolation
+
+_validar_sem_sessoes_abertas
+- 1 BusinessRuleViolation
+
+_serializar_criacao_r2_rotativo
+- 1 ConflictError
+
+_validar_candidatos_divergencia
+- 1 BusinessRuleViolation
+
+criacao.py
+- 8 HTTPException restantes
+
+10U-E trata somente:
+
+HTTP 400
+"Foram encontrados itens para recontagem, porém nenhuma
+localização foi encontrada no snapshot ou no histórico
+de contagens."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+REGRA PRESERVADA
+----------------
+A nova rodada de divergências não pode prosseguir com
+itens_gerados > 0 e localizacoes_geradas == 0 quando a
+recontagem por localização estiver ativa.
+
+A fase não altera como as localizações são descobertas.
+
+ROTATIVO:
+- preserva as localizações divergentes recebidas dos candidatos;
+- preserva inserção em RodadaLocalizacoes.
+
+OFICIAL:
+- preserva sincronizar_localizacoes_recontagem().
+
+Depois da 10U-E:
+
+_gerar_localizacoes_nova_rodada
+- 0 HTTPException
+- 1 BusinessRuleViolation
+
+criacao.py
+- exatamente 7 HTTPException
+- todos em _selecionar_candidatos()
+- FastAPI permanece temporariamente.
+
+O instalador:
+- exige semanticamente 10U-A/B/C/D;
+- exige exatamente 8 HTTPException antes;
+- exige 7 em _selecionar_candidatos + 1 no alvo;
+- valida status/detail exatos;
+- protege os 7 raises de _selecionar_candidatos;
+- revalida sp_getapplock;
+- rastreia facades/reexports;
+- preserva rollback/log;
+- não altera SQL/UoW/commit/rollback;
+- auto-restaura todos os arquivos em caso de falha.
+
+Aplicar:
+python .\fase10u_e_excecoes_criacao_localizacoes\aplicar_fase10u_e.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado se 10U-D deixou:
+HTTP imports: 10
+HTTP raises : 133
+
+Após 10U-E:
+HTTP imports: 10
+HTTP raises : 132
+
+FastAPI não cai ainda.
+
+PRÓXIMA ETAPA
+-------------
+Restarão 7 HTTPException exclusivamente em:
+_selecionar_candidatos()
+
+Esse bloco NÃO deve ser migrado inteiro de uma vez.
+
+A sequência deve separar os ramos:
+- ROTATIVO;
+- OFICIAL;
+- GESTOR;
+- tipo de próxima rodada não suportado.
+
+Só depois da última subfase de _selecionar_candidatos()
+o import FastAPI poderá ser removido de criacao.py.

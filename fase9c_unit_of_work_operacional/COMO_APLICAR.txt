@@ -1,0 +1,112 @@
+FASE 9C - UNIT OF WORK NO NÚCLEO OPERACIONAL
+================================================
+
+Pré-requisitos
+--------------
+- Fase 9A aplicada
+- Fase 9B aplicada/validada
+- regressões anteriores aprovadas
+
+Routers desta fase
+------------------
+1. routers\inventarios.py
+   POST /inventarios
+   Permissão: INVENTARIO_CRIAR
+
+2. routers\rotativo.py
+   POST /inventarios/{id}/decisoes-rotativo
+   Permissão: INVENTARIO_ROTATIVO_DECIDIR
+
+3. routers\gestor.py
+   POST /inventarios/{id}/decisoes-gestor
+   Permissão: GESTOR_DECIDIR
+
+4. routers\encaminhamento_gestor.py
+   POST /inventarios/{id}/encaminhar-gestor
+   Permissão: GESTOR_DECIDIR
+
+Instalador idempotente
+----------------------
+Cada router é classificado como:
+- LEGADO: ainda usa get_connection();
+- UOW: já usa SqlServerUnitOfWork;
+- DESCONHECIDO: estrutura não reconhecida.
+
+Se qualquer router estiver DESCONHECIDO:
+- nenhum arquivo é alterado;
+- o instalador exibe diagnóstico.
+
+Se estiver UOW:
+- não é sobrescrito;
+- apenas validado.
+
+Se estiver LEGADO:
+- backup individual é criado;
+- migração é aplicada.
+
+Estrutura usada
+---------------
+uow = SqlServerUnitOfWork()
+uow.open()
+
+conn = uow.connection
+cursor = uow.cursor
+
+O alias conn é mantido nesta fase para compatibilidade,
+principalmente com o fluxo ROTATIVO de inteligência pós-commit.
+
+IMPORTANTE — ROTATIVO
+---------------------
+A versão mais recente executa:
+
+1. registra decisão;
+2. COMMIT da decisão principal;
+3. roda inteligência pós-justificativa;
+4. falha analítica não desfaz a decisão principal.
+
+Esse comportamento é preservado.
+
+A chamada que usa:
+executar_orquestracao_rotativo(
+    conn=conn,
+    cursor=cursor,
+    ...
+)
+
+continua recebendo:
+conn = uow.connection
+
+Não alterado
+------------
+- quantidade de commits
+- quantidade de rollbacks
+- posição lógica dos commits/rollbacks
+- serviços
+- SQL de negócio
+- repositories
+- permissões
+- endpoints
+- regras ROTATIVO/OFICIAL
+- Fases 9A/9B
+
+Ficam para próximas fases
+-------------------------
+- auth.py
+- usuarios.py
+- contagens.py
+- demais routers administrativos/operacionais
+
+Aplicar
+-------
+Na raiz do SGI:
+
+python .\fase9c_unit_of_work_operacional\aplicar_fase9c.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA

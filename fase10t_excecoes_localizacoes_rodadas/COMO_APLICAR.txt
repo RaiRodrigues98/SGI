@@ -1,0 +1,91 @@
+FASE 10T - LOCALIZAÇÕES DE RECONTAGEM
+=========================================
+
+Alvo:
+services\rodadas\localizacoes.py
+└── sincronizar_localizacoes_recontagem()
+
+Baseline:
+1 HTTPException.
+
+HTTP 404:
+"Rodada não encontrada para este inventário."
+
+Mapeamento:
+HTTP 404 -> NotFoundError
+
+A função:
+1. valida se ID_Rodada pertence ao ID_Inventario;
+2. carrega os itens da rodada;
+3. localiza endereços dos itens;
+4. insere RodadaLocalizacoes;
+5. retorna total e lista de localizações.
+
+A única regra HTTP do módulo é a validação da rodada.
+
+Consumers conhecidos historicamente:
+- criação de próxima rodada;
+- endpoint direto de sincronização de localizações.
+
+O instalador NÃO depende dessa lista:
+ele monta grafo cross-module e atravessa facades/reexports.
+
+Nos routers:
+- reutiliza NotFoundError -> HTTP 404 se já existir;
+- adiciona somente onde faltar;
+- replica rollback/log do except HTTPException;
+- deixa `except Exception -> HTTP 500` existente intacto e depois
+  do handler específico, portanto NotFoundError não vira 500.
+
+Bloqueios:
+- HTTPException extra no módulo;
+- status/detail diferente;
+- caller fora de services/routers;
+- service intermediário `except Exception -> HTTPException`;
+- fronteira HTTP sem padrão seguro.
+
+Não altera:
+- SQL;
+- RodadaItens;
+- RodadaLocalizacoes;
+- busca por Código/Lote;
+- geração de localizações;
+- UoW;
+- commit;
+- conexão;
+- rotas;
+- respostas de sucesso.
+
+Pré-requisito:
+Fase 10S aplicada.
+
+Aplicar:
+python .\fase10t_excecoes_localizacoes_rodadas\aplicar_fase10t.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Se as fases 10Q, 10R e 10S foram aplicadas conforme previsto,
+o baseline antes da 10T será aproximadamente:
+
+HTTP imports: 11
+HTTP raises : 140
+
+Após 10T:
+HTTP imports: 10
+HTTP raises : 139
+
+ValueError/RuntimeError:
+69 -> 69
+
+Custom exception types:
+6 -> 6
+
+Próximo bloco provável:
+Fase 10U -> services\rodadas\criacao.py
+
+Como `criacao.py` possui muitos raises e é central para OFICIAL e
+ROTATIVO, a 10U deverá ser dividida em sub-recortes, e não migrada
+inteira em uma única etapa.

@@ -1,0 +1,473 @@
+from domain.exceptions import BusinessRuleViolation, NotFoundError
+from fastapi import HTTPException
+
+from services.configuracoes_inventario import (
+    obter_configuracao_por_inventario,
+)
+
+from services.analise_recontagem import (
+    analisar_recontagem_oficial,
+)
+
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def _normalizar_texto(valor):
+
+    if valor is None:
+        return ""
+
+    return str(valor).strip()
+
+
+def _normalizar_upper(valor):
+
+    return (
+        _normalizar_texto(valor)
+        .upper()
+    )
+
+
+# ============================================================
+# ENCaminhar INVENTÁRIO PARA GESTOR
+#
+# Regras:
+#
+# - somente OFICIAL
+# - inventário precisa estar ABERTO
+# - não pode haver sessões abertas
+# - rodada operacional precisa estar concluída
+# - precisa haver divergências pendentes
+# - configuração deve permitir gestor antecipado
+# - quantidade de pendências deve respeitar o limite
+# - não cria rodada física GESTOR
+# - somente marca o estágio lógico no inventário
+#
+# Commit continua responsabilidade do router.
+# ============================================================
+
+def encaminhar_inventario_para_gestor(
+    cursor,
+    id_inventario: int,
+    usuario: str
+):
+
+    usuario = _normalizar_texto(
+        usuario
+    )
+
+    if id_inventario <= 0:
+
+                raise BusinessRuleViolation(
+            "Inventário inválido."
+        )
+
+    if not usuario:
+
+                raise BusinessRuleViolation(
+            "Usuário responsável pelo encaminhamento é obrigatório."
+        )
+
+    # ========================================================
+    # 1. INVENTÁRIO
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Inventario,
+            CodigoInventario,
+            Tipo,
+            ClienteId,
+            RodadaAtual,
+            Status,
+            EmAnaliseGestor,
+            DataHoraEncaminhamentoGestor,
+            EncaminhadoGestorPor
+
+        FROM dbo.Inventarios
+
+        WHERE ID_Inventario = ?
+        """,
+        id_inventario
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+
+                raise NotFoundError(
+            "Inventário não encontrado."
+        )
+
+    tipo = _normalizar_upper(
+        inventario.Tipo
+    )
+
+    status = _normalizar_upper(
+        inventario.Status
+    )
+
+    # ========================================================
+    # 2. SOMENTE OFICIAL
+    # ========================================================
+
+    if tipo != "OFICIAL":
+
+                raise BusinessRuleViolation(
+            "Encaminhamento gerencial antecipado está disponível somente para inventário OFICIAL."
+        )
+
+    # ========================================================
+    # 3. STATUS DO INVENTÁRIO
+    # ========================================================
+
+    if status == "FINALIZADO":
+
+                raise BusinessRuleViolation(
+            "Inventário finalizado não pode ser encaminhado ao gestor."
+        )
+
+    if status == "CANCELADO":
+
+                raise BusinessRuleViolation(
+            "Inventário cancelado não pode ser encaminhado ao gestor."
+        )
+
+    # ========================================================
+    # 4. JÁ ESTÁ EM ANÁLISE GERENCIAL
+    # ========================================================
+
+    if bool(
+        inventario.EmAnaliseGestor
+    ):
+
+        return {
+            "sucesso":
+                True,
+
+            "id_inventario":
+                inventario.ID_Inventario,
+
+            "codigo_inventario":
+                inventario.CodigoInventario,
+
+            "em_analise_gestor":
+                True,
+
+            "ja_encaminhado":
+                True,
+
+            "data_hora_encaminhamento":
+                inventario.DataHoraEncaminhamentoGestor,
+
+            "encaminhado_por":
+                inventario.EncaminhadoGestorPor,
+
+            "mensagem":
+                (
+                    "O inventário já está em "
+                    "análise gerencial."
+                )
+        }
+
+    # ========================================================
+    # 5. CONFIGURAÇÃO
+    # ========================================================
+
+    configuracao = (
+        obter_configuracao_por_inventario(
+            cursor=cursor,
+            id_inventario=id_inventario
+        )
+    )
+
+    permitir_gestor_antecipado = bool(
+        configuracao[
+            "permitir_gestor_antecipado"
+        ]
+    )
+
+    limite_gestor = int(
+        configuracao[
+            "limite_itens_gestor_antecipado"
+        ]
+    )
+
+    if not permitir_gestor_antecipado:
+
+                raise BusinessRuleViolation(
+            "A configuração deste inventário não permite encaminhamento antecipado ao gestor."
+        )
+
+    if limite_gestor <= 0:
+
+                raise BusinessRuleViolation(
+            "O limite de itens para encaminhamento antecipado não está configurado."
+        )
+
+    # ========================================================
+    # 6. RODADA ATUAL
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Rodada,
+            ID_Inventario,
+            NumeroRodada,
+            Status,
+            DataHoraInicio
+
+        FROM dbo.RodadasInventario
+
+        WHERE
+            ID_Inventario = ?
+            AND NumeroRodada = ?
+
+        ORDER BY
+            ID_Rodada DESC
+        """,
+        (
+            id_inventario,
+            inventario.RodadaAtual
+        )
+    )
+
+    rodada = cursor.fetchone()
+
+    if not rodada:
+
+                raise NotFoundError(
+            "Rodada atual não encontrada."
+        )
+
+    # ========================================================
+    # 7. SESSÕES ABERTAS
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+
+        FROM dbo.SessoesContagem
+
+        WHERE
+            ID_Inventario = ?
+            AND ID_Rodada = ?
+            AND Status = 'ABERTA'
+        """,
+        (
+            id_inventario,
+            rodada.ID_Rodada
+        )
+    )
+
+    sessoes_abertas = int(
+        cursor.fetchone()[0]
+    )
+
+    if sessoes_abertas > 0:
+
+                raise BusinessRuleViolation(
+            "Existem sessões de contagem abertas. Encerre todas antes de encaminhar o inventário ao gestor."
+        )
+
+    # ========================================================
+    # 8. A RODADA PRECISA SER DE RECONTAGEM
+    #
+    # O gestor antecipado só faz sentido depois das
+    # rodadas iniciais completas.
+    # ========================================================
+
+    rodadas_iniciais = int(
+        configuracao[
+            "rodadas_iniciais"
+        ]
+    )
+
+    if rodada.NumeroRodada <= rodadas_iniciais:
+
+                raise BusinessRuleViolation(
+            "O inventário ainda está nas rodadas iniciais de contagem."
+        )
+
+    # ========================================================
+    # 9. ANÁLISE DA RODADA
+    # ========================================================
+
+    analise = (
+        analisar_recontagem_oficial(
+            cursor=cursor,
+            id_inventario=id_inventario,
+            id_rodada=rodada.ID_Rodada
+        )
+    )
+
+    rodada_concluida = bool(
+        analise.get(
+            "rodada_operacional_concluida",
+            False
+        )
+    )
+
+    if not rodada_concluida:
+
+                raise BusinessRuleViolation(
+            "A rodada atual ainda não foi concluída operacionalmente."
+        )
+
+    # ========================================================
+    # 10. ITENS PENDENTES
+    # ========================================================
+
+    itens_pendentes = []
+
+    for item in analise.get(
+        "itens",
+        []
+    ):
+
+        if not item.get(
+            "pendente_proxima_rodada",
+            False
+        ):
+            continue
+
+        itens_pendentes.append(
+            {
+                "codigo":
+                    item.get(
+                        "codigo"
+                    ),
+
+                "lote":
+                    item.get(
+                        "lote"
+                    ),
+
+                "status":
+                    item.get(
+                        "status"
+                    ),
+
+                "qtd_estoque":
+                    item.get(
+                        "qtd_estoque"
+                    ),
+
+                "qtd_contada":
+                    item.get(
+                        "qtd_contada"
+                    ),
+
+                "diferenca":
+                    item.get(
+                        "diferenca"
+                    )
+            }
+        )
+
+    total_pendentes = len(
+        itens_pendentes
+    )
+
+    # ========================================================
+    # 11. PRECISA EXISTIR DIVERGÊNCIA
+    # ========================================================
+
+    if total_pendentes == 0:
+
+                raise BusinessRuleViolation(
+            "Não existem divergências pendentes para encaminhamento ao gestor."
+        )
+
+    # ========================================================
+    # 12. VALIDA LIMITE
+    # ========================================================
+
+    if total_pendentes > limite_gestor:
+
+                raise BusinessRuleViolation(
+            "A quantidade de itens divergentes excede o limite configurado para encaminhamento antecipado ao gestor. Pendentes: {total_pendentes}. Limite: {limite_gestor}."
+        )
+
+    # ========================================================
+    # 13. MARCA INVENTÁRIO EM ANÁLISE GERENCIAL
+    # ========================================================
+
+    cursor.execute(
+        """
+        UPDATE dbo.Inventarios
+
+        SET
+            EmAnaliseGestor = 1,
+            DataHoraEncaminhamentoGestor =
+                SYSDATETIME(),
+            EncaminhadoGestorPor = ?
+
+        WHERE
+            ID_Inventario = ?
+            AND EmAnaliseGestor = 0
+        """,
+        (
+            usuario,
+            id_inventario
+        )
+    )
+
+    if cursor.rowcount == 0:
+
+                raise BusinessRuleViolation(
+            "Não foi possível encaminhar o inventário ao gestor."
+        )
+
+    # ========================================================
+    # 14. RETORNO
+    # ========================================================
+
+    return {
+        "sucesso":
+            True,
+
+        "id_inventario":
+            inventario.ID_Inventario,
+
+        "codigo_inventario":
+            inventario.CodigoInventario,
+
+        "tipo_inventario":
+            tipo,
+
+        "rodada_atual":
+            rodada.NumeroRodada,
+
+        "id_rodada":
+            rodada.ID_Rodada,
+
+        "em_analise_gestor":
+            True,
+
+        "ja_encaminhado":
+            False,
+
+        "total_itens_pendentes":
+            total_pendentes,
+
+        "limite_itens_gestor":
+            limite_gestor,
+
+        "itens_pendentes":
+            itens_pendentes,
+
+        "encaminhado_por":
+            usuario,
+
+        "mensagem":
+            (
+                "Inventário encaminhado para "
+                "análise gerencial com sucesso."
+            )
+    }

@@ -1,0 +1,94 @@
+FASE 9H v2 - AUDITORIA FINAL CORRIGIDA
+==========================================
+
+Esta fase NÃO altera o SGI.
+
+Correções da v2
+---------------
+1. NÃO procura palavras como EXECUTE no código Python bruto.
+
+A v1 viu:
+cursor.execute(...)
+
+e acabou contabilizando "execute" como se fosse
+SQL EXEC/EXECUTE.
+
+A v2 usa AST e lê apenas o primeiro argumento real
+de cursor.execute()/cursor.executemany().
+
+Exemplo:
+
+cursor.execute(
+    '''
+    SELECT ...
+    '''
+)
+
+é classificado como SELECT.
+
+cursor.execute(
+    '''
+    UPDATE ...
+    '''
+)
+
+é classificado como UPDATE.
+
+2. Reconhece ownership delegado ao service.
+
+Exemplo:
+
+router:
+    service(
+        conn=conn,
+        cursor=cursor
+    )
+
+service:
+    conn.commit()
+    conn.rollback()
+
+Se o router ainda usa get_connection():
+    BLOQUEADOR
+
+Se o router usa SqlServerUnitOfWork:
+    VÁLIDO - SERVICE OWNED
+
+3. Valida explicitamente as Fases 9I/9J.
+
+Devem estar em UoW:
+- routers/analise.py
+- routers/rotativo_ciclos.py
+- routers/rotativo_cobertura.py
+- routers/rotativo_fluxo.py
+- routers/rotativo_priorizacao.py
+
+Critério
+--------
+A saída precisa terminar com:
+
+RESULTADO FASE 9H v2: APROVADO
+
+FASE 9 - UNIT OF WORK / TRANSAÇÕES:
+APTA PARA ENCERRAMENTO
+
+Depois, execute:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério final:
+
+RESULTADO FINAL:
+APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Somente com:
+- 9H v2 aprovada
+- regressão final verde
+
+a Fase 9 será considerada formalmente encerrada.
+
+Executar
+--------
+Na raiz do SGI:
+
+python .\fase9h_v2_auditoria_final_transacoes\auditar_fase9h_v2.py

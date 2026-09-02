@@ -1,0 +1,82 @@
+FASE 10H - CONSULTAS | DETALHE DA LOCALIZAÇÃO
+================================================
+
+Escopo:
+services\consultas_operacionais.py
+- consultar_detalhe_localizacao
+
+A Fase 10A encontrou 5 HTTPException nessa função.
+
+O instalador NÃO presume a combinação dos status.
+Ele lê o arquivo local e aceita:
+
+HTTP 400 -> BusinessRuleViolation
+HTTP 404 -> NotFoundError
+HTTP 409 -> ConflictError
+
+Qualquer outro status aborta antes da alteração.
+
+Por que a 10H precisa reconhecer a 10G?
+--------------------------------------
+consultar_detalhe_localizacao() chama consultar_inventario().
+
+A 10G já transformou:
+consultar_inventario -> NotFoundError
+
+Consequentemente, o endpoint de detalhe no router pode já ter:
+
+except NotFoundError:
+    HTTP 404
+
+A 10H:
+- detecta esse handler;
+- valida que ele já devolve HTTP 404;
+- NÃO duplica;
+- adiciona apenas handlers que faltarem
+  (por exemplo BusinessRuleViolation -> 400).
+
+Propagação:
+O instalador monta o grafo interno de chamadas e adapta
+qualquer endpoint que chame direta ou indiretamente
+consultar_detalhe_localizacao.
+
+Migração parcial:
+consultas_operacionais.py ainda possui outros HTTPException
+em funções fora do escopo.
+
+Portanto:
+- FastAPI permanece importado no service;
+- somente os 5 raises da função alvo são convertidos.
+
+Não altera:
+- SQL
+- UoW/get_connection
+- cursor
+- commit/rollback
+- rotas
+- retorno de sucesso
+
+Pré-requisito:
+Fase 10G aplicada.
+
+Aplicar:
+python .\fase10h_excecoes_consultas_detalhe_localizacao\aplicar_fase10h.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado da 10H:
+- HTTP imports: sem redução, porque ainda há HTTPException no service
+- HTTPException raises: -5
+
+Acumulado estimado desde a 10A, após 10B–10H:
+HTTP imports:
+27 -> 20
+
+HTTPException raises:
+201 -> 178
+
+ValueError/RuntimeError:
+69 -> 69

@@ -1,0 +1,88 @@
+FASE 10F - HISTÓRICO DE INVENTÁRIOS
+=====================================
+
+Escopo:
+- services\historico_inventarios.py
+- routers\historico.py
+
+Motivo:
+A Fase 10A encontrou exatamente 2 HTTPException em
+services\historico_inventarios.py.
+
+Como a cópia atual do service não estava disponível na Library,
+esta fase NÃO presume os status/mensagens.
+
+O instalador lê o arquivo LOCAL REAL antes de alterar.
+
+Mapeamento permitido:
+HTTP 400 -> BusinessRuleViolation
+HTTP 404 -> NotFoundError
+HTTP 409 -> ConflictError
+
+Qualquer outro status:
+ABORTA SEM ALTERAR.
+
+O detail é extraído via AST e preservado exatamente.
+
+Exemplo:
+raise HTTPException(
+    status_code=404,
+    detail=<expressão atual>
+)
+
+vira:
+raise NotFoundError(
+    <mesma expressão atual>
+)
+
+O router recebe:
+except NotFoundError as erro:
+    raise HTTPException(
+        status_code=404,
+        detail=str(erro)
+    )
+
+Segurança:
+- exige exatamente 2 HTTPException no service legado;
+- exige status literal 400, 404 ou 409;
+- exige consumidor único:
+  routers\historico.py;
+- localiza via AST o endpoint que chama
+  consultar_historico_inventarios;
+- não altera outros endpoints históricos;
+- não altera conexão/UoW;
+- não altera cursor;
+- não altera commit/rollback;
+- não altera SQL;
+- cria backups;
+- restaura tudo se qualquer validação falhar.
+
+Pré-requisito:
+Fase 10E aplicada.
+
+Aplicar:
+python .\fase10f_excecoes_historico_inventarios\aplicar_fase10f.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+python tests_e2e\regressao_final_sgi.py
+
+3. Execute:
+python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Redução esperada da 10F:
+- 1 import FastAPI
+- 2 raise HTTPException
+
+Acumulado esperado desde a auditoria inicial,
+se 10B–10F estiverem todas aplicadas:
+
+HTTP imports:
+27 -> 20
+
+HTTPException raises:
+201 -> 186
+
+ValueError/RuntimeError:
+69 -> 69

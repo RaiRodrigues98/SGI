@@ -1,0 +1,75 @@
+FASE 10C - RESULTADO FINAL
+==========================
+
+Escopo:
+- services\resultado_final.py
+- routers\resultado_final.py
+
+Motivo:
+O service possui apenas 2 HTTPException e ambos são 404:
+
+1. Inventário não encontrado.
+2. O inventário ainda não possui resultado final consolidado.
+
+Migração:
+HTTPException(404)
+    ->
+NotFoundError
+
+Router:
+NotFoundError
+    ->
+HTTPException(404)
+
+A fase NÃO altera:
+- get_connection ou UoW
+- cursor
+- commit
+- rollback
+- SQL
+- cálculo de acuracidade
+- consolidação
+- estrutura de retorno
+- rota
+
+Segurança:
+Antes de alterar, o instalador verifica todos os arquivos
+Python de produção e exige que o único consumidor de
+consultar_resultado_final() seja:
+
+routers\resultado_final.py
+
+Se houver outro consumidor:
+- aborta;
+- não altera nenhum arquivo.
+
+Pré-requisito:
+Fase 10B aplicada:
+- domain/exceptions.py existe;
+- services/inventarios.py já usa BusinessRuleViolation.
+
+Aplicar:
+python .\fase10c_excecoes_resultado_final\aplicar_fase10c.py
+
+Depois:
+1. Reinicie a API.
+2. Rode:
+python tests_e2e\regressao_final_sgi.py
+
+3. Rode novamente:
+python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Redução esperada acumulada após 10B + 10C:
+HTTP imports:
+27 -> 25
+
+HTTPException raises:
+201 -> 191
+
+ValueError/RuntimeError:
+69 -> 69
+
+Observação:
+configuracoes_inventario NÃO foi escolhido para a 10C porque
+possui muitos consumidores. Migrá-lo isoladamente poderia fazer
+routers ainda legados converterem DomainError em HTTP 500.

@@ -1,0 +1,127 @@
+FASE 9D - UNIT OF WORK EM AUTH E USUÁRIOS
+==========================================
+
+Pré-requisitos
+--------------
+- Fase 9A aplicada
+- Fase 9B aplicada
+- Fase 9C aplicada
+- regressões anteriores aprovadas
+
+Arquivos desta fase
+-------------------
+routers\auth.py
+routers\usuarios.py
+
+AUTH
+----
+O login possui:
+1 conexão
+1 commit
+2 caminhos de rollback
+
+A sequência permanece:
+1. autenticar usuário
+2. gerar JWT
+3. registrar UltimoLogin
+4. commit
+5. retornar token
+
+O UoW não faz auto-commit.
+
+USUÁRIOS
+--------
+usuarios.py possui 9 blocos de conexão.
+
+Rotas de escrita:
+- criar
+- atualizar
+- alterar_senha
+- vincular_perfil
+- remover_perfil
+
+Cada uma permanece com:
+1 commit
+2 caminhos de rollback
+
+Rotas de leitura:
+- listar
+- consultar
+- listar_perfis
+- listar_permissoes
+
+Elas continuam com:
+0 commit
+0 rollback
+
+Ou seja, a Fase 9D NÃO transforma GET em transação de escrita.
+
+Instalador idempotente
+----------------------
+Cada arquivo pode estar:
+- LEGADO
+- UOW
+- DESCONHECIDO
+
+Se qualquer arquivo estiver DESCONHECIDO:
+- nenhum arquivo é alterado;
+- o diagnóstico é exibido.
+
+Se já estiver em UOW:
+- apenas valida;
+- não sobrescreve.
+
+Compatibilidade
+---------------
+A estrutura mantém:
+
+uow = SqlServerUnitOfWork()
+uow.open()
+
+conn = uow.connection
+cursor = uow.cursor
+
+O alias conn é mantido por consistência com a Fase 9C,
+embora auth/usuarios não dependam dele diretamente hoje.
+
+Preservado
+----------
+- /auth/login
+- geração JWT
+- registro UltimoLogin
+- USUARIO_GERENCIAR
+- todos os serviços de usuário
+- endpoints
+- permissões
+- quantidade de commits
+- quantidade de rollbacks
+- rotas GET sem commit
+- Fases 9A/9B/9C
+
+Aplicar
+-------
+Na raiz do SGI:
+
+python .\fase9d_unit_of_work_auth_usuarios\aplicar_fase9d.py
+
+Depois:
+1. Reinicie a API.
+2. Execute:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Próxima fase
+------------
+Fase 9E:
+routers\contagens.py
+
+Contagens fica separada porque possui:
+- abertura de sessão;
+- encerramento de localização;
+- concorrência;
+- UNIQUE/2601/2627;
+- estados de recontagem;
+- múltiplos pontos de escrita.

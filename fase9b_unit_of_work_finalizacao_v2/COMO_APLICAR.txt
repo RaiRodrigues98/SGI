@@ -1,0 +1,74 @@
+FASE 9B v2 - CORREÇÃO DO INSTALADOR
+====================================
+
+Motivo da correção
+------------------
+O primeiro instalador exigia que routers\finalizacao.py ainda
+utilizasse diretamente:
+
+- get_connection()
+- conn.commit()
+- conn.rollback()
+- cursor.close()
+- conn.close()
+
+No seu projeto, esses tokens já não existem.
+
+A v2 é idempotente e reconhece três estados:
+
+1. LEGADO
+---------
+Ainda usa get_connection().
+A v2 migra para SqlServerUnitOfWork.
+
+2. UOW_EXPLICITO
+----------------
+Já possui:
+uow = SqlServerUnitOfWork()
+uow.open()
+cursor = uow.cursor
+uow.commit()
+uow.rollback()
+uow.close()
+
+Nesse caso o instalador NÃO altera o arquivo.
+Ele valida e informa que a Fase 9B já está aplicada.
+
+3. UOW_CONTEXTO
+---------------
+Já usa:
+with SqlServerUnitOfWork() as uow
+
+Também é validado sem sobrescrever o router.
+
+Proteções obrigatórias em qualquer estado
+------------------------------------------
+- POST /inventarios/{id_inventario}/finalizar
+- INVENTARIO_FINALIZAR
+- finalizar_inventario_oficial()
+- finalizar_inventario_rotativo()
+- sys.sp_getapplock
+- LockOwner='Transaction'
+- SGI:INVENTARIO:{id}:FINALIZAR
+
+Segurança
+---------
+Se o arquivo estiver em uma quarta estrutura não reconhecida:
+- nenhum arquivo é alterado;
+- o instalador imprime diagnóstico;
+- encerra com erro controlado.
+
+Aplicar
+-------
+Na raiz do SGI:
+
+python .\fase9b_unit_of_work_finalizacao_v2\aplicar_fase9b_v2.py
+
+Depois:
+1. Reinicie a API.
+2. Rode:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA

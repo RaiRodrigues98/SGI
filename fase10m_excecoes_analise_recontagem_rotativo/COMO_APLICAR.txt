@@ -1,0 +1,119 @@
+FASE 10M - ANALISE_RECONTAGEM_ROTATIVO
+=========================================
+
+Alvo:
+services\analise_recontagem_rotativo.py
+
+Mapa real da auditoria 10A:
+- _resolver_coluna_quantidade: 1 HTTPException
+- _buscar_rodada: 1 HTTPException
+- analisar_recontagem_rotativo: 2 HTTPException
+
+Total: 4.
+
+Perfil conhecido:
+1) HTTP 500 - erro técnico de schema/coluna de quantidade
+2) HTTP 404 - rodada inexistente
+3) HTTP 400 - rodada menor que R2
+4) HTTP 400 - R1 do ROTATIVO inexistente
+
+IMPORTANTE: HTTP 500 NÃO é regra de negócio.
+
+A 10M cria:
+application\__init__.py
+application\exceptions.py
+
+Com:
+ApplicationError
+TechnicalConfigurationError
+
+Mapeamento:
+HTTP 400 -> domain.BusinessRuleViolation
+HTTP 404 -> domain.NotFoundError
+HTTP 500 -> application.TechnicalConfigurationError
+
+Por que criar exceção técnica separada?
+---------------------------------------
+O erro de coluna de quantidade indica que o schema do banco não
+possui uma coluna esperada. O código interrompe a análise para
+evitar produzir resultado de inventário incorreto.
+
+Isso é uma falha técnica/configuração, não uma regra de estoque.
+
+Não deve virar:
+BusinessRuleViolation
+DomainError
+NotFoundError
+
+Fronteira HTTP:
+BusinessRuleViolation -> HTTP 400
+NotFoundError -> HTTP 404
+TechnicalConfigurationError -> HTTP 500
+
+O detail atual é preservado exatamente.
+
+Grafo de consumidores:
+A análise ROTATIVO R2 pode ser chamada por services de rodadas/
+finalização e por endpoints de análise.
+
+O instalador:
+- indexa módulos de produção;
+- monta grafo de chamadas;
+- usa três seeds internos:
+  _resolver_coluna_quantidade
+  _buscar_rodada
+  analisar_recontagem_rotativo
+- encontra callers transitivos;
+- bloqueia camada inesperada;
+- bloqueia service que capture Exception e gere HTTPException;
+- adapta todas as fronteiras HTTP alcançadas.
+
+Rollback/log:
+Se um router atual possui:
+
+except HTTPException:
+    uow.rollback()
+    raise
+
+o prefixo operacional é replicado nos novos handlers.
+
+Não altera:
+- SQL
+- classificação:
+  RESOLVIDO_R2
+  DIVERGENCIA_LOCALIZACAO
+  DIVERGENCIA_CONFIRMADA
+  INCONSISTENCIA_R1_R2
+- regras R1/R2
+- commit
+- conexão/UoW
+- services intermediários
+- rotas
+- respostas de sucesso
+
+Pré-requisito:
+Fase 10L aplicada.
+
+Aplicar:
+python .\fase10m_excecoes_analise_recontagem_rotativo\aplicar_fase10m.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado:
+HTTP imports:
+17 -> 16
+
+HTTPException raises:
+165 -> 161
+
+ValueError/RuntimeError:
+permanece 69
+
+Custom exception types:
+aumentará porque a 10M introduz ApplicationError e
+TechnicalConfigurationError.
+
+A nova auditoria 10A será a autoridade para a Fase 10N.

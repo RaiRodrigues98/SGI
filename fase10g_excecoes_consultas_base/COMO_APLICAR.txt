@@ -1,0 +1,89 @@
+FASE 10G - CONSULTAS OPERACIONAIS | NÚCLEO
+=========================================
+
+Escopo:
+services\consultas_operacionais.py
+- consultar_inventario
+- consultar_rodada_atual
+
+Erros migrados:
+consultar_inventario:
+- 404 Inventário não encontrado.
+
+consultar_rodada_atual:
+- 404 Inventário não encontrado.
+- 404 Rodada atual não encontrada.
+
+Total: 3 HTTPException -> NotFoundError.
+
+Por que o router precisa de análise transitiva?
+-----------------------------------------------
+Outras funções do mesmo service chamam essas funções:
+
+exemplo:
+consultar_contagem_atual()
+    -> consultar_inventario()
+    -> consultar_rodada_atual()
+    -> consultar_localizacoes_inventario()
+
+Então não basta adaptar apenas os endpoints que chamam
+consultar_inventario diretamente.
+
+O instalador:
+1. monta grafo de chamadas entre funções top-level do service;
+2. parte de:
+   consultar_inventario
+   consultar_rodada_atual
+3. encontra todos os callers transitivos;
+4. verifica quais dessas funções são importadas pelo router;
+5. localiza os endpoints que as chamam;
+6. adiciona NotFoundError -> HTTP 404 nesses endpoints.
+
+Isso impede DomainError cair no except Exception e virar HTTP 500.
+
+Migração parcial intencional
+----------------------------
+services\consultas_operacionais.py continua contendo outros
+HTTPException em funções ainda não migradas.
+
+Por isso a 10G:
+- ADICIONA import NotFoundError;
+- NÃO remove `from fastapi import HTTPException`.
+
+Não altera:
+- demais HTTPException
+- SQL
+- conexão/UoW
+- cursor
+- commit/rollback
+- rotas
+- retorno de sucesso
+
+Pré-requisito:
+Fase 10F aplicada.
+
+Aplicar:
+python .\fase10g_excecoes_consultas_base\aplicar_fase10g.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado da 10G:
+HTTP imports:
+sem redução nesta etapa, pois o service ainda possui
+HTTPException em outras funções.
+
+HTTPException raises:
+-3
+
+Acumulado estimado desde a auditoria inicial após 10B–10G:
+HTTP imports:
+27 -> 20
+
+HTTPException raises:
+201 -> 183
+
+ValueError/RuntimeError:
+69 -> 69

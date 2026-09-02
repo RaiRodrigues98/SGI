@@ -1,0 +1,309 @@
+SGI - REGRESSÃO FINAL DO NÚCLEO DE INVENTÁRIO
+API: http://127.0.0.1:8000
+Projeto: C:\Users\rai.sousa\Desktop\SGI
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Log: C:\Users\rai.sousa\Desktop\SGI\tests_e2e\logs\regressao_final_sgi_20260901_181454.log
+[FAIL] Regressão acumulada base (regressao_completa.py) - 25.22s
+       RESULTADO GERAL: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - REGRESS�O COMPLETA DO INVENT�RIO
+Python: C:\Users\rai.sousa\Desktop\SGI\.venv\Scripts\python.exe
+Pasta:  C:\Users\rai.sousa\Desktop\SGI\tests_e2e
+Timeout por teste: 600s
+Sa�da completa: SIM
+==============================================================================
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Fluxo E2E
+ARQUIVO:   teste_rotativo_e2e_v2.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: ROTATIVO - Prote��es
+ARQUIVO:   teste_rotativo_protecoes_corrigido.py
+==============================================================================
+
+[REPROVADO] ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 3 - Estados limite e consist�ncia
+ARQUIVO:   teste_rotativo_estagio3.py
+==============================================================================
+
+[REPROVADO] EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 4
+ARQUIVO:   teste_rotativo_estagio4.py
+==============================================================================
+
+[REPROVADO] EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 5
+ARQUIVO:   teste_rotativo_estagio5.py
+==============================================================================
+
+[REPROVADO] EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 6
+ARQUIVO:   teste_rotativo_estagio6_corrigido.py
+==============================================================================
+
+[REPROVADO] EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 7
+ARQUIVO:   teste_rotativo_estagio7.py
+==============================================================================
+
+[REPROVADO] EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 8
+ARQUIVO:   teste_rotativo_estagio8.py
+==============================================================================
+
+[REPROVADO] EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 9
+ARQUIVO:   teste_rotativo_estagio9.py
+==============================================================================
+
+[REPROVADO] EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 10 - Regress�o OFICIAL
+ARQUIVO:   teste_oficial_estagio10.py
+==============================================================================
+
+[REPROVADO] EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+EXECUTANDO: EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL
+ARQUIVO:   teste_estagio12_coexistencia.py
+==============================================================================
+
+[REPROVADO] EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+
+==============================================================================
+SGI - RESUMO DA REGRESS�O COMPLETA
+==============================================================================
+TESTE                                         STATUS           TEMPO  ARQUIVO
+--------------------------------------------------------------------------------------------------------------
+ROTATIVO - Fluxo E2E                          REPROVADO         2.3s  teste_rotativo_e2e_v2.py
+ROTATIVO - Prote��es                          REPROVADO         2.3s  teste_rotativo_protecoes_corrigido.py
+EST�GIO 3 - Estados limite e consist�ncia     REPROVADO         2.3s  teste_rotativo_estagio3.py
+EST�GIO 4                                     REPROVADO         2.3s  teste_rotativo_estagio4.py
+EST�GIO 5                                     REPROVADO         2.3s  teste_rotativo_estagio5.py
+EST�GIO 6                                     REPROVADO         2.3s  teste_rotativo_estagio6_corrigido.py
+EST�GIO 7                                     REPROVADO         2.3s  teste_rotativo_estagio7.py
+EST�GIO 8                                     REPROVADO         2.3s  teste_rotativo_estagio8.py
+EST�GIO 9                                     REPROVADO         2.3s  teste_rotativo_estagio9.py
+EST�GIO 10 - Regress�o OFICIAL                REPROVADO         2.3s  teste_oficial_estagio10.py
+EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL  REPROVADO         2.3s  teste_estagio12_coexistencia.py
+
+TOTAL PREVISTO: 11
+EXECUTADOS:     11
+APROVADOS:      0
+REPROVADOS:     11
+AUSENTES:       0
+TEMPO TOTAL:    25.1s
+
+RESULTADO GERAL: REPROVADO
+
+FALHAS:
+ - ROTATIVO - Fluxo E2E: 'charmap' codec can't encode character '\ufffd' in position 78: character maps to <undefined>
+ - ROTATIVO - Prote��es: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 3 - Estados limite e consist�ncia: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 4: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 5: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 6: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 7: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 8: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 9: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 10 - Regress�o OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+ - EST�GIO 12 - Coexist�ncia ROTATIVO x OFICIAL: 'charmap' codec can't encode character '\ufffd' in position 83: character maps to <undefined>
+==============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] OFICIAL - Guard de regressão (teste_oficial_estagio10.py) - 2.29s
+
+------- SAÍDA DO TESTE REPROVADO -------
+========================================================================
+SGI - EST�GIO 10 | REGRESS�O DO INVENT�RIO OFICIAL
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Localiza��o: 01PLAQUETA
+========================================================================
+
+[STDERR]
+Traceback (most recent call last):
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 1319, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1358, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1404, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1353, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1113, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1057, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1023, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\socket.py", line 864, in create_connection
+    raise exceptions[0]
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\socket.py", line 849, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 2040, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 1983, in main
+    api.login()
+    ~~~~~~~~~^^
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 262, in login
+    retorno = self.request(
+        "POST",
+    ...<7 lines>...
+        }
+    )
+  File "C:\Users\rai.sousa\Desktop\SGI\tests_e2e\teste_oficial_estagio10.py", line 186, in request
+    with urllib.request.urlopen(
+         ~~~~~~~~~~~~~~~~~~~~~~^
+        req,
+        ^^^^
+        timeout=TIMEOUT
+        ^^^^^^^^^^^^^^^
+    ) as response:
+    ^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 489, in open
+    response = self._open(req, data)
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 506, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 466, in _call_chain
+    result = func(*args)
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 1348, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rai.sousa\AppData\Local\Programs\Python\Python313\Lib\urllib\request.py", line 1322, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 13 - Integridade transacional (teste_rotativo_estagio13.py) - 2.25s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+========================================================================
+SGI - EST�GIO 13 | INTEGRIDADE TRANSACIONAL E RECUPERA��O DE ESTADO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007
+========================================================================
+[FAIL] Est�gio 13: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+
+========================================================================
+PASS: 1 | FAIL: 1
+RESULTADO: REPROVADO
+========================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 14 - Concorrência real (teste_rotativo_estagio14.py) - 2.30s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+============================================================================
+SGI - EST�GIO 14 | CONCORR�NCIA REAL / MULTIUSU�RIO
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+============================================================================
+[FAIL] Autentica��o: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+
+============================================================================
+PASS: 0 | FAIL: 1
+RESULTADO: REPROVADO
+============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 15 - Segurança e RBAC (teste_rotativo_estagio15.py) - 6.38s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+============================================================================
+SGI - EST�GIO 15 | SEGURAN�A, PERMISS�ES E ISOLAMENTO
+============================================================================
+[FAIL] Autentica��o obrigat�ria nos endpoints protegidos: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+[FAIL] Token inv�lido � rejeitado: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+[FAIL] Autentica��o e prepara��o dos invent�rios isolados: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+
+============================================================================
+PASS: 0 | FAIL: 3
+RESULTADO: REPROVADO
+ - Autentica��o obrigat�ria nos endpoints protegidos: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+ - Token inv�lido � rejeitado: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+ - Autentica��o e prepara��o dos invent�rios isolados: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+============================================================================
+------- FIM DA SAÍDA -------
+
+[FAIL] Estágio 16 - Performance e readiness (teste_rotativo_estagio16.py) - 21.46s
+       RESULTADO: REPROVADO
+
+------- SAÍDA DO TESTE REPROVADO -------
+
+==============================================================================
+SGI - EST�GIO 16 | CARGA, PERFORMANCE E READINESS DE PRODU��O
+API: http://127.0.0.1:8000 | Cliente: 53 | Armaz�m: ML007 | Local: 01PLAQUETA
+Carga: seq=20 | conc=40 | workers=8
+Limites P95: seq<=2.00s | conc<=3.00s
+==============================================================================
+[FAIL] Autentica��o: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+[FAIL] API em execu��o est� com autentica��o obrigat�ria: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+[FAIL] Cat�logo RBAC cobre todas as permiss�es exigidas pelos routers: ('08001', '[08001] [Microsoft][ODBC Driver 18 for SQL Server]Provedor de Pipes Nomeados: N�o foi poss�vel abrir uma conex�o com o SQL Server [53].  (53) (SQLDriverConnect); [08001] [Microsoft][ODBC Driver 18 for SQL Server]O tempo limite do logon expirou (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Ocorreu um erro relacionado � rede ou espec�fico da inst�ncia ao estabelecer uma conex�o com None. Servidor n�o encontrado ou n�o acess�vel. Verifique se o nome da inst�ncia est� correto e se o SQL Server est� configurado para permitir conex�es remotas. Para mais informa��es, veja os Manuais Online do SQL Server. (53)')
+[FAIL] Prepara��o E2E para carga: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+
+==============================================================================
+PASS: 0 | FAIL: 4
+RESULTADO: REPROVADO
+ - Autentica��o: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+ - API em execu��o est� com autentica��o obrigat�ria: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+ - Cat�logo RBAC cobre todas as permiss�es exigidas pelos routers: ('08001', '[08001] [Microsoft][ODBC Driver 18 for SQL Server]Provedor de Pipes Nomeados: N�o foi poss�vel abrir uma conex�o com o SQL Server [53].  (53) (SQLDriverConnect); [08001] [Microsoft][ODBC Driver 18 for SQL Server]O tempo limite do logon expirou (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Ocorreu um erro relacionado � rede ou espec�fico da inst�ncia ao estabelecer uma conex�o com None. Servidor n�o encontrado ou n�o acess�vel. Verifique se o nome da inst�ncia est� correto e se o SQL Server est� configurado para permitir conex�es remotas. Para mais informa��es, veja os Manuais Online do SQL Server. (53)')
+ - Prepara��o E2E para carga: <urlopen error [WinError 10061] Nenhuma conex�o p�de ser feita porque a m�quina de destino as recusou ativamente>
+==============================================================================
+------- FIM DA SAÍDA -------
+
+RESUMO FINAL
+FALHOU | Regressão acumulada base                   |   25.22s
+FALHOU | OFICIAL - Guard de regressão               |    2.29s
+FALHOU | Estágio 13 - Integridade transacional      |    2.25s
+FALHOU | Estágio 14 - Concorrência real             |    2.30s
+FALHOU | Estágio 15 - Segurança e RBAC              |    6.38s
+FALHOU | Estágio 16 - Performance e readiness       |   21.46s
+PASS: 0 | FAIL: 6 | SKIP: 0 | DURAÇÃO TOTAL: 60.02s
+RESULTADO FINAL: REPROVADO
+O núcleo não deve avançar para homologação até a(s) falha(s) serem classificadas e corrigidas.

@@ -1,0 +1,59 @@
+FASE 5 - REFATORAÇÃO DE RODADAS
+================================
+
+Objetivo
+--------
+Extrair a finalização terminal do inventário ROTATIVO.
+
+Também foi extraído o helper de lifecycle
+_finalizar_rodada_atual para evitar import circular entre
+rodadas_service.py e finalizacao_rotativo.py.
+
+Novos arquivos
+--------------
+services\rodadas\lifecycle.py
+services\rodadas\finalizacao_rotativo.py
+
+Funções extraídas
+-----------------
+- _finalizar_rodada_atual
+- _encerrar_inventario_rotativo_apos_r1_sem_recontagem
+- _encerrar_inventario_rotativo_apos_r2
+
+Permanece no rodadas_service.py
+-------------------------------
+- criar_proxima_rodada
+- visualizar_proxima_rodada
+- fluxo de orquestração
+- análise gerencial
+- análise ROTATIVO usada pelo preview
+- chamadas para candidatos ROTATIVO e OFICIAL
+- proteção sp_getapplock
+
+NÃO ALTERADO
+------------
+- contratos HTTP
+- schemas
+- banco
+- RBAC
+- regras de candidatos
+- regra de negócio dos encerramentos
+- fluxo OFICIAL
+
+COMO APLICAR
+------------
+Na raiz do SGI:
+
+python .\fase5_refatoracao_rodadas\aplicar_fase5_rodadas.py
+
+Depois:
+1. Reinicie a API.
+2. Rode:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério obrigatório:
+
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Não avance se houver qualquer FAIL.

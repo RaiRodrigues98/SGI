@@ -1,0 +1,88 @@
+FASE 10V-E - FINALIZAÇÃO ROTATIVO / SESSÕES ABERTAS R1
+==============================================================
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+└── _encerrar_inventario_rotativo_apos_r1_sem_recontagem()
+
+Erro:
+HTTP 400
+"Existem sessões abertas na R1.
+Encerre todas antes de finalizar o inventário ROTATIVO."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+PRÉ-REQUISITOS
+--------------
+- 10U-H
+- 10V-A
+- 10V-B
+- 10V-C
+- 10V-D
+
+10V-D precisa ter convertido:
+"Encerramento ROTATIVO pela R1 disponível somente
+para a primeira rodada."
+
+Se qualquer pré-requisito falhar:
+o instalador para antes de alterar arquivos.
+
+REGRA PRESERVADA
+----------------
+A consulta continua verificando:
+
+dbo.SessoesContagem
+ID_Inventario = inventario atual
+ID_Rodada = R1 atual
+Status = 'ABERTA'
+
+Se sessoes_abertas > 0:
+o encerramento continua bloqueado.
+
+Apenas o tipo interno da exceção muda.
+
+PROTEÇÕES
+---------
+- HTTPException total cai exatamente em 1;
+- SQL idêntico antes/depois;
+- SessoesContagem intocada;
+- DecisoesRotativo intocada;
+- OcorrenciasDivergencia intocada;
+- consolidar_resultado_final_rotativo_r1 intocada;
+- _finalizar_rodada_atual intocada;
+- UoW/commit/rollback/conexão intocados;
+- FastAPI permanece se ainda necessário;
+- backup + auto-restore.
+
+Aplicar:
+python .\fase10v_e_excecoes_finalizacao_rotativo_sessoes_abertas_r1\aplicar_fase10v_e.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Se a 10V-D deixou:
+HTTP imports          : 9
+HTTPException raises  : 121
+HTTPException handlers: 0
+ValueError/RuntimeError: 69
+Custom exception types: 6
+
+Após 10V-E esperado:
+HTTP imports:
+9 -> 9
+
+HTTPException raises:
+121 -> 120
+
+HTTPException handlers:
+0 -> 0
+
+ValueError/RuntimeError:
+69 -> 69
+
+Próximo recorte provável:
+10V-F -> "Existem decisões RECONTAR ativas.
+          O inventário deve seguir para R2."

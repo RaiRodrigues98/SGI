@@ -1,0 +1,73 @@
+FASE 10V-C - FINALIZAÇÃO ROTATIVO / FALHA AO FINALIZAR R2
+=================================================================
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+└── _encerrar_inventario_rotativo_apos_r2()
+
+Erro:
+HTTP 400
+"Não foi possível finalizar o inventário ROTATIVO."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+PRÉ-REQUISITOS
+--------------
+10V-A:
+- R2 ainda não concluída operacionalmente já é BusinessRuleViolation.
+
+10V-B:
+- R1 não localizada já é BusinessRuleViolation.
+
+Se qualquer uma estiver ausente:
+- o instalador aborta antes da mutação.
+
+COMPATIBILIDADE COM FASE 8D
+---------------------------
+O instalador aceita:
+- UPDATE dbo.Inventarios direto; ou
+- repository finalizar_rotativo_pela_r2().
+
+Ele não altera nenhum dos dois.
+
+PROTEÇÕES
+---------
+- total HTTPException deve cair exatamente em 1;
+- SQL literals idênticos antes/depois;
+- chamadas AST idênticas antes/depois;
+- repository/lifecycle preservados;
+- UoW/commit/rollback/conexão preservados;
+- nenhum router editado;
+- backup + auto-restore.
+
+Aplicar:
+python .\fase10v_c_excecoes_finalizacao_rotativo_falha_finalizar_r2\aplicar_fase10v_c.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Mapa global antes:
+HTTP imports          : 9
+HTTPException raises  : 123
+HTTPException handlers: 0
+ValueError/RuntimeError: 69
+Custom exception types: 6
+
+Após 10V-C esperado:
+HTTP imports:
+9 -> 9
+
+HTTPException raises:
+123 -> 122
+
+HTTPException handlers:
+0 -> 0
+
+ValueError/RuntimeError:
+69 -> 69
+
+O output do instalador listará os erros restantes do módulo.
+A 10V-D será escolhida a partir desse perfil real.

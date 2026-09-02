@@ -1,0 +1,95 @@
+FASE 10O - ANALISE_ROTATIVO | INVENTÁRIO
+========================================
+
+Alvo:
+services\analise_rotativo.py
+└── analisar_inventario_rotativo()
+
+Pré-requisito:
+Fase 10N aplicada.
+
+A auditoria após 10N confirmou:
+HTTP imports          : 16
+HTTPException raises  : 153
+
+Dentro de analise_rotativo.py restam exatamente 3:
+- 404 Inventário não encontrado.
+- 400 análise disponível somente para inventário ROTATIVO.
+- 404 Rodada atual não encontrada para este inventário.
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+HTTP 404 -> NotFoundError
+
+A função analisar_sessao_rotativo já deve estar migrada pela 10N:
+- 5 BusinessRuleViolation
+- 3 NotFoundError
+- 0 HTTPException
+
+A 10O valida isso antes de qualquer alteração.
+
+Fechamento do service:
+Depois de converter os 3 últimos raises:
+- exige zero raise HTTPException;
+- exige zero except HTTPException;
+- remove HTTPException do import FastAPI;
+- exige zero import FastAPI/Starlette no service.
+
+Consumers:
+O instalador usa o resolvedor de grafo com facades/reexports
+que foi corrigido na Fase 10M v2.
+
+Ele encontra todos os callers transitivos de
+analisar_inventario_rotativo, incluindo:
+- routers diretos;
+- services intermediários;
+- facades/reexports.
+
+Bloqueios:
+- caller fora de services/routers;
+- service intermediário que capture Exception e gere HTTPException;
+- router sem padrão seguro de except HTTPException;
+- baseline diferente de 3 raises 1x400 + 2x404;
+- qualquer HTTPException extra no service.
+
+Nos routers:
+- reutiliza handlers criados pela 10N quando aplicável;
+- adiciona apenas os faltantes;
+- não duplica BusinessRuleViolation/NotFoundError;
+- replica rollback/log do except HTTPException.
+
+Não altera:
+- SQL
+- conciliação Localização + Código + Lote
+- lógica R1/R2+
+- classificação de divergências
+- UoW
+- commits
+- conexões
+- rotas
+- respostas de sucesso
+
+Aplicar:
+python .\fase10o_excecoes_analise_rotativo_inventario\aplicar_fase10o.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Impacto esperado:
+HTTP imports:
+16 -> 15
+
+HTTPException raises:
+153 -> 150
+
+ValueError/RuntimeError:
+69 -> 69
+
+Custom exception types:
+6 -> 6
+
+Resultado arquitetural:
+services\analise_rotativo.py
+não terá mais dependência FastAPI/Starlette.

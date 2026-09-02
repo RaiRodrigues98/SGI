@@ -1,0 +1,68 @@
+FASE 7 - REFATORAÇÃO DE RODADAS
+================================
+
+Objetivo
+--------
+Transformar criar_proxima_rodada() em um orquestrador pequeno.
+
+Novo arquivo
+------------
+services\rodadas\criacao.py
+
+O que foi separado internamente
+-------------------------------
+- contexto básico da rodada
+- configuração e limite de rodadas
+- validação de sessões abertas
+- sp_getapplock da R2 ROTATIVO
+- idempotência / rodada já existente
+- seleção de candidatos
+- validação de divergência sem candidatos
+- INSERT da nova rodada
+- geração de RodadaItens
+- geração de RodadaLocalizacoes
+- UPDATE de Inventarios.RodadaAtual
+- montagem do retorno
+
+Fachada
+-------
+services\rodadas_service.py passa a ser uma fachada compatível.
+
+Isso significa que imports existentes como:
+
+from services.rodadas_service import criar_proxima_rodada
+
+continuam funcionando.
+
+Preservado
+----------
+- ROTATIVO
+- OFICIAL
+- R1 -> R2 ROTATIVO
+- encerramento pela R1
+- encerramento após R2
+- decisões do gestor
+- preview
+- sp_getapplock
+- SQL Server
+- contratos HTTP
+- schemas
+- RBAC
+- responsabilidade de commit/rollback do fluxo existente
+
+Como aplicar
+------------
+Na raiz do SGI:
+
+python .\fase7_refatoracao_rodadas\aplicar_fase7_rodadas.py
+
+Depois:
+1. Reinicie a API.
+2. Rode:
+
+python tests_e2e\regressao_final_sgi.py
+
+Critério obrigatório:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Se houver qualquer FAIL, não avance.

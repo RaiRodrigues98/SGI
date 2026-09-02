@@ -1,0 +1,1999 @@
+from fastapi import HTTPException
+from domain.exceptions import BusinessRuleViolation, NotFoundError
+
+from services.decisoes_rotativo import (
+    listar_decisoes_rotativo_ativas,
+)
+from services.ocorrencias_divergencia import (
+    buscar_historico_divergencias,
+)
+from services.classificacao_divergencia_rotativo import (
+    classificar_item_rotativo,
+    aplicar_diagnostico_lotes,
+)
+# ============================================================
+# ANÁLISE DO INVENTÁRIO ROTATIVO
+#
+# Regra:
+#
+# Conciliação por:
+# Localizacao + Codigo + Lote
+#
+# Produto é apenas informativo e vem de Descricao.
+# ============================================================
+
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def _normalizar_texto(valor):
+
+    if valor is None:
+        return ""
+
+    return str(valor).strip()
+
+
+def _normalizar_localizacao(valor):
+
+    return (
+        _normalizar_texto(valor)
+        .upper()
+    )
+
+
+def _normalizar_lote(valor):
+
+    return _normalizar_texto(valor)
+
+
+# ============================================================
+# ANALISAR SESSÃO ROTATIVA
+#
+# Regra:
+# - analisa SOMENTE o ID_Sessao informado;
+# - não soma outras sessões da mesma localização/rodada;
+# - mantém a conciliação por Localizacao + Codigo + Lote;
+# - R1 usa o snapshot completo da localização;
+# - R2+ limita o snapshot aos itens candidatos da rodada;
+# - itens encontrados e não existentes no snapshot continuam
+#   entrando no universo para permitir SOBRA.
+# ============================================================
+
+def analisar_sessao_rotativo(
+    cursor,
+    sessao
+):
+
+    # ========================================================
+    # 1. VALIDAR SESSÃO
+    # ========================================================
+
+    if sessao is None:
+
+        raise NotFoundError(
+            "Sessão não encontrada."
+        )
+
+    if sessao.ID_Sessao is None:
+
+        raise BusinessRuleViolation(
+            "Sessão inválida."
+        )
+
+    if sessao.ID_Inventario is None:
+
+        raise BusinessRuleViolation(
+            "Sessão sem inventário vinculado."
+        )
+
+    if sessao.ID_Rodada is None:
+
+        raise BusinessRuleViolation(
+            "Sessão sem rodada vinculada."
+        )
+
+    localizacao_sessao = (
+        _normalizar_localizacao(
+            sessao.Localizacao
+        )
+    )
+
+    if not localizacao_sessao:
+
+        raise BusinessRuleViolation(
+            "Sessão sem localização válida."
+        )
+
+    # ========================================================
+    # 2. INVENTÁRIO
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Inventario,
+            CodigoInventario,
+            Tipo,
+            ClienteId,
+            Status
+
+        FROM dbo.Inventarios
+
+        WHERE ID_Inventario = ?
+        """,
+        sessao.ID_Inventario
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+
+        raise NotFoundError(
+            "Inventário não encontrado."
+        )
+
+    tipo = (
+        _normalizar_texto(
+            inventario.Tipo
+        )
+        .upper()
+    )
+
+    if tipo != "ROTATIVO":
+
+        raise BusinessRuleViolation(
+            "Esta análise de sessão está disponível "
+                "somente para inventário ROTATIVO."
+        )
+
+    # ========================================================
+    # 3. RODADA DA PRÓPRIA SESSÃO
+    #
+    # Não usamos Inventarios.RodadaAtual aqui.
+    # A sessão deve ser analisada exatamente na rodada em que
+    # foi criada, mesmo que o inventário já tenha avançado.
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Rodada,
+            ID_Inventario,
+            NumeroRodada,
+            Status,
+            DataHoraInicio
+
+        FROM dbo.RodadasInventario
+
+        WHERE
+            ID_Rodada = ?
+            AND ID_Inventario = ?
+        """,
+        (
+            sessao.ID_Rodada,
+            sessao.ID_Inventario,
+        )
+    )
+
+    rodada = cursor.fetchone()
+
+    if not rodada:
+
+        raise NotFoundError(
+            "Rodada da sessão não encontrada "
+                "para este inventário."
+        )
+
+    # ========================================================
+    # 4. UNIVERSO DE ANÁLISE DA SESSÃO
+    #
+    # IMPORTANTE:
+    # A CTE Contagem usa C.ID_Sessao = ?.
+    #
+    # Assim:
+    # sessão 61 = 3 unidades
+    # sessão 62 = 3 unidades
+    #
+    # analisar sessão 62 retorna 3, e NÃO 6.
+    # ========================================================
+
+    if rodada.NumeroRodada == 1:
+
+        cursor.execute(
+            """
+            WITH Snapshot AS
+            (
+                SELECT
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '') AS Lote,
+
+                    MAX(E.Descricao) AS Produto,
+                    MAX(E.Unidade) AS Unidade,
+                    MAX(E.Categoria) AS Categoria,
+
+                    SUM(E.SaldoInventario) AS QtdEstoque
+
+                FROM dbo.InventarioEstoqueSnapshot E
+
+                WHERE
+                    E.ID_Inventario = ?
+                    AND UPPER(LTRIM(RTRIM(E.Localizacao))) = ?
+
+                GROUP BY
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '')
+            ),
+
+            Contagem AS
+            (
+                SELECT
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '') AS Lote,
+
+                    SUM(C.Quantidade) AS QtdContada
+
+                FROM dbo.Contagens C
+
+                INNER JOIN dbo.SessoesContagem S
+                    ON S.ID_Sessao = C.ID_Sessao
+
+                WHERE
+                    C.ID_Sessao = ?
+                    AND C.Status = 'ATIVA'
+
+                GROUP BY
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '')
+            ),
+
+            Universo AS
+            (
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Snapshot
+
+                UNION
+
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Contagem
+            )
+
+            SELECT
+                U.Localizacao,
+                U.Codigo,
+                U.Lote,
+
+                E.Produto,
+                E.Unidade,
+                E.Categoria,
+
+                ISNULL(E.QtdEstoque, 0) AS QtdEstoque,
+                ISNULL(C.QtdContada, 0) AS QtdContada,
+
+                CASE
+                    WHEN E.Codigo IS NULL THEN 0
+                    ELSE 1
+                END AS ExisteNoSnapshot
+
+            FROM Universo U
+
+            LEFT JOIN Snapshot E
+                ON UPPER(LTRIM(RTRIM(E.Localizacao))) =
+                   UPPER(LTRIM(RTRIM(U.Localizacao)))
+               AND LTRIM(RTRIM(E.Codigo)) =
+                   LTRIM(RTRIM(U.Codigo))
+               AND ISNULL(LTRIM(RTRIM(E.Lote)), '') =
+                   ISNULL(LTRIM(RTRIM(U.Lote)), '')
+
+            LEFT JOIN Contagem C
+                ON UPPER(LTRIM(RTRIM(C.Localizacao))) =
+                   UPPER(LTRIM(RTRIM(U.Localizacao)))
+               AND LTRIM(RTRIM(C.Codigo)) =
+                   LTRIM(RTRIM(U.Codigo))
+               AND ISNULL(LTRIM(RTRIM(C.Lote)), '') =
+                   ISNULL(LTRIM(RTRIM(U.Lote)), '')
+
+            ORDER BY
+                U.Localizacao,
+                U.Codigo,
+                U.Lote
+            """,
+            (
+                sessao.ID_Inventario,
+                localizacao_sessao,
+                sessao.ID_Sessao,
+            )
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            WITH Snapshot AS
+            (
+                SELECT
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '') AS Lote,
+
+                    MAX(E.Descricao) AS Produto,
+                    MAX(E.Unidade) AS Unidade,
+                    MAX(E.Categoria) AS Categoria,
+
+                    SUM(E.SaldoInventario) AS QtdEstoque
+
+                FROM dbo.InventarioEstoqueSnapshot E
+
+                INNER JOIN dbo.RodadaItens RI
+                    ON RI.ID_Inventario = E.ID_Inventario
+                   AND RI.ID_Rodada = ?
+                   AND LTRIM(RTRIM(RI.Codigo)) =
+                       LTRIM(RTRIM(E.Codigo))
+                   AND ISNULL(LTRIM(RTRIM(RI.Lote)), '') =
+                       ISNULL(LTRIM(RTRIM(E.Lote)), '')
+
+                WHERE
+                    E.ID_Inventario = ?
+                    AND UPPER(LTRIM(RTRIM(E.Localizacao))) = ?
+
+                GROUP BY
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '')
+            ),
+
+            Contagem AS
+            (
+                SELECT
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '') AS Lote,
+
+                    SUM(C.Quantidade) AS QtdContada
+
+                FROM dbo.Contagens C
+
+                INNER JOIN dbo.SessoesContagem S
+                    ON S.ID_Sessao = C.ID_Sessao
+
+                WHERE
+                    C.ID_Sessao = ?
+                    AND C.Status = 'ATIVA'
+
+                GROUP BY
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '')
+            ),
+
+            Universo AS
+            (
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Snapshot
+
+                UNION
+
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Contagem
+            )
+
+            SELECT
+                U.Localizacao,
+                U.Codigo,
+                U.Lote,
+
+                E.Produto,
+                E.Unidade,
+                E.Categoria,
+
+                ISNULL(E.QtdEstoque, 0) AS QtdEstoque,
+                ISNULL(C.QtdContada, 0) AS QtdContada,
+
+                CASE
+                    WHEN E.Codigo IS NULL THEN 0
+                    ELSE 1
+                END AS ExisteNoSnapshot
+
+            FROM Universo U
+
+            LEFT JOIN Snapshot E
+                ON UPPER(LTRIM(RTRIM(E.Localizacao))) =
+                   UPPER(LTRIM(RTRIM(U.Localizacao)))
+               AND LTRIM(RTRIM(E.Codigo)) =
+                   LTRIM(RTRIM(U.Codigo))
+               AND ISNULL(LTRIM(RTRIM(E.Lote)), '') =
+                   ISNULL(LTRIM(RTRIM(U.Lote)), '')
+
+            LEFT JOIN Contagem C
+                ON UPPER(LTRIM(RTRIM(C.Localizacao))) =
+                   UPPER(LTRIM(RTRIM(U.Localizacao)))
+               AND LTRIM(RTRIM(C.Codigo)) =
+                   LTRIM(RTRIM(U.Codigo))
+               AND ISNULL(LTRIM(RTRIM(C.Lote)), '') =
+                   ISNULL(LTRIM(RTRIM(U.Lote)), '')
+
+            ORDER BY
+                U.Localizacao,
+                U.Codigo,
+                U.Lote
+            """,
+            (
+                sessao.ID_Rodada,
+                sessao.ID_Inventario,
+                localizacao_sessao,
+                sessao.ID_Sessao,
+            )
+        )
+
+    linhas = cursor.fetchall()
+
+    # ========================================================
+    # 5. DECISÕES ATIVAS DO ROTATIVO
+    # ========================================================
+
+    decisoes_ativas = (
+        listar_decisoes_rotativo_ativas(
+            cursor=cursor,
+            id_inventario=sessao.ID_Inventario
+        )
+    )
+
+    mapa_decisoes = {}
+
+    for decisao in decisoes_ativas:
+
+        chave_decisao = (
+            _normalizar_localizacao(
+                decisao["localizacao"]
+            ),
+            _normalizar_texto(
+                decisao["codigo"]
+            ),
+            _normalizar_lote(
+                decisao["lote"]
+            ),
+        )
+
+        mapa_decisoes[
+            chave_decisao
+        ] = decisao
+
+    # ========================================================
+    # 6. STATUS DA SESSÃO
+    # ========================================================
+
+    sessao_encerrada = (
+        _normalizar_texto(
+            sessao.Status
+        )
+        .upper()
+        ==
+        "ENCERRADA"
+    )
+
+       # ========================================================
+    # 7. ANALISAR ITEM A ITEM
+    # ========================================================
+
+    itens = []
+
+    for linha in linhas:
+
+        localizacao = (
+            _normalizar_localizacao(
+                linha.Localizacao
+            )
+        )
+
+        codigo = (
+            _normalizar_texto(
+                linha.Codigo
+            )
+        )
+
+        lote = (
+            _normalizar_lote(
+                linha.Lote
+            )
+        )
+
+        qtd_estoque = float(
+            linha.QtdEstoque
+        )
+
+        qtd_contada = float(
+            linha.QtdContada
+        )
+
+        existe_no_snapshot = bool(
+            linha.ExisteNoSnapshot
+        )
+
+        diferenca = (
+            qtd_contada
+            -
+            qtd_estoque
+        )
+
+        localizacoes_esperadas = []
+        subtipo_divergencia = None
+
+        if not sessao_encerrada:
+
+            status = "AGUARDANDO_CONTAGEM"
+            resultado_definitivo = False
+
+        else:
+
+            diagnostico = classificar_item_rotativo(
+                cursor=cursor,
+                id_inventario=sessao.ID_Inventario,
+                localizacao=localizacao,
+                codigo=codigo,
+                lote=lote,
+                qtd_estoque=qtd_estoque,
+                qtd_contada=qtd_contada,
+                existe_no_snapshot=existe_no_snapshot,
+            )
+
+            status = diagnostico["status"]
+
+            subtipo_divergencia = (
+                diagnostico["subtipo_divergencia"]
+            )
+
+            localizacoes_esperadas = (
+                diagnostico["localizacoes_esperadas"]
+            )
+
+            resultado_definitivo = True
+            # ====================================================
+            # HISTÓRICO DE DIVERGÊNCIAS
+            # ====================================================
+
+            historico_divergencias = None
+
+            if (
+                resultado_definitivo
+                and
+                status
+                in (
+                    "FALTA",
+                    "SOBRA",
+                    "DIVERGÊNCIA",
+                )
+            ):
+
+                historico_divergencias = (
+                    buscar_historico_divergencias(
+                        cursor=cursor,
+                        cliente_id=inventario.ClienteId,
+                        codigo=codigo,
+                        lote=lote,
+                        limite=10
+                    )
+                )
+
+            # ====================================================
+            # DECISÃO ROTATIVO
+            # ====================================================
+
+            chave_decisao = (
+                localizacao,
+                codigo,
+                lote,
+            )
+
+            decisao_rotativo = (
+                mapa_decisoes.get(
+                    chave_decisao
+                )
+            )
+
+            decisao_tipo = None
+            justificativa = None
+            usuario_decisao = None
+            data_hora_decisao = None
+            id_decisao_rotativo = None
+
+            if decisao_rotativo:
+
+                decisao_tipo = (
+                    decisao_rotativo[
+                        "decisao"
+                    ]
+                )
+
+                justificativa = (
+                    decisao_rotativo[
+                        "justificativa"
+                    ]
+                )
+
+                usuario_decisao = (
+                    decisao_rotativo[
+                        "usuario"
+                    ]
+                )
+
+                data_hora_decisao = (
+                    decisao_rotativo[
+                        "data_hora"
+                    ]
+                )
+
+                id_decisao_rotativo = (
+                    decisao_rotativo[
+                        "id_decisao_rotativo"
+                    ]
+                )
+
+            requer_decisao = (
+                resultado_definitivo
+                and
+                status
+                in (
+                    "FALTA",
+                    "SOBRA",
+                    "DIVERGÊNCIA",
+                )
+            )
+
+            pendente_decisao = (
+                requer_decisao
+                and
+                decisao_rotativo is None
+            )
+
+            pendente_recontagem = (
+                requer_decisao
+                and
+                decisao_tipo == "RECONTAR"
+            )
+
+            divergencia_justificada = (
+                requer_decisao
+                and
+                decisao_tipo
+                ==
+                "JUSTIFICAR_DIVERGENCIA"
+            )
+
+            if status == "OK":
+
+                resolvido = True
+
+            elif divergencia_justificada:
+
+                resolvido = True
+
+            else:
+
+                resolvido = False
+
+            itens.append(
+                {
+                    "chave": (
+                        f"{localizacao}|"
+                        f"{codigo}|"
+                        f"{lote}"
+                    ),
+
+                    "localizacao":
+                        localizacao,
+
+                    "codigo":
+                        codigo,
+
+                    "produto":
+                        linha.Produto,
+
+                    "lote":
+                        lote,
+
+                    "unidade":
+                        linha.Unidade,
+
+                    "categoria":
+                        linha.Categoria,
+
+                    "qtd_estoque":
+                        qtd_estoque,
+
+                    "qtd_contada":
+                        qtd_contada,
+
+                    "existe_no_snapshot":
+                        existe_no_snapshot,
+
+                    "diferenca":
+                        diferenca,
+
+                    "status":
+                        status,
+
+                    "subtipo_divergencia":
+                        subtipo_divergencia,
+
+                    "localizacoes_esperadas":
+                        localizacoes_esperadas,
+
+                    "resultado_definitivo":
+                        resultado_definitivo,
+
+                    "historico_divergencias":
+                        historico_divergencias,
+
+                    "requer_decisao":
+                        requer_decisao,
+
+                    "pendente_decisao":
+                        pendente_decisao,
+
+                    "resolvido":
+                        resolvido,
+
+                    "pendente_recontagem":
+                        pendente_recontagem,
+
+                    "divergencia_justificada":
+                        divergencia_justificada,
+
+                    "decisao_rotativo": {
+                        "possui_decisao":
+                            decisao_rotativo
+                            is not None,
+
+                        "id_decisao_rotativo":
+                            id_decisao_rotativo,
+
+                        "decisao":
+                            decisao_tipo,
+
+                        "justificativa":
+                            justificativa,
+
+                        "usuario":
+                            usuario_decisao,
+
+                        "data_hora":
+                            data_hora_decisao,
+                    }
+                }
+            )
+
+    # ========================================================
+    # 8. CORRELACIONAR DIVERGÊNCIAS ENTRE LOTES
+    # ========================================================
+
+    itens = aplicar_diagnostico_lotes(
+        itens
+    )
+
+    # ========================================================
+    # 9. RETORNO
+    # ========================================================
+
+    return {
+        "tipo_analise":
+            "ROTATIVO_SESSAO",
+
+        "id_sessao":
+            sessao.ID_Sessao,
+
+        "id_inventario":
+            sessao.ID_Inventario,
+
+        "id_rodada":
+            sessao.ID_Rodada,
+
+        "numero_rodada":
+            rodada.NumeroRodada,
+
+        "localizacao":
+            localizacao_sessao,
+
+        "status_sessao":
+            sessao.Status,
+
+        "regra_conciliacao":
+            "LOCALIZACAO_CODIGO_LOTE",
+
+        "considera_localizacao":
+            True,
+
+        "contagem_cega":
+            True,
+
+        "itens":
+            itens,
+    }
+
+
+
+# ============================================================
+# ANALISAR INVENTÁRIO ROTATIVO
+# ============================================================
+
+def analisar_inventario_rotativo(
+    cursor,
+    id_inventario: int
+):
+
+    # ========================================================
+    # 1. INVENTÁRIO
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Inventario,
+            CodigoInventario,
+            Tipo,
+            ClienteId,
+            RodadaAtual,
+            Status
+
+        FROM dbo.Inventarios
+
+        WHERE ID_Inventario = ?
+        """,
+        id_inventario
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Inventário não encontrado."
+        )
+
+    tipo = (
+        str(
+            inventario.Tipo
+        )
+        .strip()
+        .upper()
+    )
+
+    if tipo != "ROTATIVO":
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Esta análise está disponível "
+                "somente para inventário ROTATIVO."
+            )
+        )
+
+    # ========================================================
+    # 2. RODADA OPERACIONAL ATUAL
+    #
+    # A análise deve acompanhar a rodada atual do inventário.
+    #
+    # R1:
+    # - escopo completo do inventário
+    #
+    # R2+:
+    # - somente localizações de RodadaLocalizacoes
+    # - somente itens de RodadaItens
+    #
+    # Isso evita que uma sessão de recontagem consulte
+    # novamente as contagens da R1.
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Rodada,
+            NumeroRodada,
+            Status,
+            DataHoraInicio
+
+        FROM dbo.RodadasInventario
+
+        WHERE
+            ID_Inventario = ?
+            AND NumeroRodada = ?
+
+        ORDER BY
+            ID_Rodada DESC
+        """,
+        (
+            id_inventario,
+            inventario.RodadaAtual
+        )
+    )
+
+    rodada = cursor.fetchone()
+
+    if not rodada:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Rodada atual não encontrada "
+                "para este inventário."
+            )
+        )
+
+    # ========================================================
+    # 3. LOCALIZAÇÕES DA RODADA
+    #
+    # R1 usa o escopo completo selecionado.
+    # R2+ usa somente RodadaLocalizacoes.
+    # ========================================================
+
+    if rodada.NumeroRodada == 1:
+
+        cursor.execute(
+            """
+            SELECT
+                Localizacao AS Localizacao
+
+            FROM dbo.InventarioEscopoLocalizacoes
+
+            WHERE
+                ID_Inventario = ?
+                AND Selecionado = 1
+
+            ORDER BY
+                Localizacao
+            """,
+            id_inventario
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            SELECT
+                Localizacao AS Localizacao
+
+            FROM dbo.RodadaLocalizacoes
+
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+
+            ORDER BY
+                Localizacao
+            """,
+            (
+                id_inventario,
+                rodada.ID_Rodada
+            )
+        )
+
+    escopo = cursor.fetchall()
+
+    localizacoes_escopo = [
+        _normalizar_localizacao(
+            linha.Localizacao
+        )
+        for linha in escopo
+        if _normalizar_localizacao(
+            linha.Localizacao
+        )
+    ]
+
+    # ========================================================
+    # 4. STATUS OPERACIONAL DAS LOCALIZAÇÕES
+    #
+    # Usa as sessões da rodada operacional em análise.
+    # ========================================================
+
+    localizacoes = []
+
+    total_concluidas = 0
+
+    for localizacao in localizacoes_escopo:
+
+        cursor.execute(
+            """
+            SELECT TOP 1
+                ID_Sessao,
+                Status,
+                DataHoraInicio,
+                DataHoraFim,
+                LocalizacaoVazia
+
+            FROM dbo.SessoesContagem
+
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+
+                AND Localizacao = ?
+
+            ORDER BY
+                ID_Sessao DESC
+            """,
+            (
+                id_inventario,
+                rodada.ID_Rodada,
+                localizacao
+            )
+        )
+
+        sessao = cursor.fetchone()
+
+        if not sessao:
+
+            status_operacional = "PENDENTE"
+
+            id_sessao = None
+
+            localizacao_vazia = False
+
+        elif sessao.Status == "ENCERRADA":
+
+            status_operacional = "CONCLUIDA"
+
+            id_sessao = sessao.ID_Sessao
+
+            localizacao_vazia = bool(
+                sessao.LocalizacaoVazia
+            )
+
+            total_concluidas += 1
+
+        else:
+
+            status_operacional = "EM_CONTAGEM"
+
+            id_sessao = sessao.ID_Sessao
+
+            localizacao_vazia = False
+
+        localizacoes.append(
+            {
+                "localizacao":
+                    localizacao,
+
+                "id_sessao":
+                    id_sessao,
+
+                "status":
+                    status_operacional,
+
+                "localizacao_vazia":
+                    localizacao_vazia
+            }
+        )
+
+    total_localizacoes = len(
+        localizacoes
+    )
+
+    total_pendentes = (
+        total_localizacoes
+        -
+        total_concluidas
+    )
+
+    rodada_operacional_concluida = (
+        total_localizacoes > 0
+        and
+        total_pendentes == 0
+    )
+
+    # ========================================================
+    # 5. UNIVERSO DE ANÁLISE
+    #
+    # R1:
+    # Snapshot completo do inventário + itens encontrados.
+    #
+    # R2+:
+    # Snapshot limitado às localizações e itens candidatos
+    # da rodada + itens efetivamente encontrados na rodada.
+    #
+    # A contagem SEMPRE é buscada pela rodada atualmente
+    # analisada.
+    # ========================================================
+
+    if rodada.NumeroRodada == 1:
+
+        cursor.execute(
+            """
+            WITH Snapshot AS
+            (
+                SELECT
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '') AS Lote,
+
+                    MAX(E.Descricao) AS Produto,
+                    MAX(E.Unidade) AS Unidade,
+                    MAX(E.Categoria) AS Categoria,
+
+                    SUM(E.SaldoInventario) AS QtdEstoque
+
+                FROM dbo.InventarioEstoqueSnapshot E
+
+                INNER JOIN dbo.InventarioEscopoLocalizacoes IEL
+                    ON IEL.ID_Inventario = E.ID_Inventario
+                   AND UPPER(LTRIM(RTRIM(IEL.Localizacao))) =
+                       UPPER(LTRIM(RTRIM(E.Localizacao)))
+                   AND IEL.Selecionado = 1
+
+                WHERE
+                    E.ID_Inventario = ?
+
+                GROUP BY
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '')
+            ),
+
+                        Contagem AS
+            (
+                SELECT
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '') AS Lote,
+
+                    SUM(C.Quantidade) AS QtdContada
+
+                FROM dbo.Contagens C
+
+                INNER JOIN dbo.SessoesContagem S
+                    ON S.ID_Sessao = C.ID_Sessao
+
+                WHERE
+                    S.ID_Inventario = ?
+                    AND S.ID_Rodada = ?
+                    AND S.ValidaParaConsolidacao = 1
+                    AND C.Status = 'ATIVA'
+
+                GROUP BY
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '')
+            ),
+            Universo AS
+            (
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Snapshot
+
+                UNION
+
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Contagem
+            )
+
+            SELECT
+                U.Localizacao,
+                U.Codigo,
+                U.Lote,
+
+                E.Produto,
+                E.Unidade,
+                E.Categoria,
+
+                ISNULL(E.QtdEstoque, 0) AS QtdEstoque,
+                ISNULL(C.QtdContada, 0) AS QtdContada,
+
+                CASE
+                    WHEN E.Codigo IS NULL THEN 0
+                    ELSE 1
+                END AS ExisteNoSnapshot
+
+            FROM Universo U
+
+            LEFT JOIN Snapshot E
+                ON E.Localizacao = U.Localizacao
+               AND E.Codigo = U.Codigo
+               AND E.Lote = U.Lote
+
+            LEFT JOIN Contagem C
+                ON C.Localizacao = U.Localizacao
+               AND C.Codigo = U.Codigo
+               AND C.Lote = U.Lote
+
+            ORDER BY
+                U.Localizacao,
+                U.Codigo,
+                U.Lote
+            """,
+            (
+                id_inventario,
+                id_inventario,
+                rodada.ID_Rodada
+            )
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            WITH Snapshot AS
+            (
+                SELECT
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '') AS Lote,
+
+                    MAX(E.Descricao) AS Produto,
+                    MAX(E.Unidade) AS Unidade,
+                    MAX(E.Categoria) AS Categoria,
+
+                    SUM(E.SaldoInventario) AS QtdEstoque
+
+                FROM dbo.InventarioEstoqueSnapshot E
+
+                INNER JOIN dbo.RodadaLocalizacoes RL
+                    ON RL.ID_Inventario = E.ID_Inventario
+                   AND RL.ID_Rodada = ?
+                   AND UPPER(LTRIM(RTRIM(RL.Localizacao))) =
+                       UPPER(LTRIM(RTRIM(E.Localizacao)))
+
+                INNER JOIN dbo.RodadaItens RI
+                    ON RI.ID_Inventario = E.ID_Inventario
+                   AND RI.ID_Rodada = ?
+                   AND LTRIM(RTRIM(RI.Codigo)) =
+                       LTRIM(RTRIM(E.Codigo))
+                   AND ISNULL(LTRIM(RTRIM(RI.Lote)), '') =
+                       ISNULL(LTRIM(RTRIM(E.Lote)), '')
+
+                WHERE
+                    E.ID_Inventario = ?
+
+                GROUP BY
+                    E.Localizacao,
+                    E.Codigo,
+                    ISNULL(E.Lote, '')
+            ),
+
+            Contagem AS
+            (
+                SELECT
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '') AS Lote,
+
+                    SUM(C.Quantidade) AS QtdContada
+
+                FROM dbo.Contagens C
+
+                INNER JOIN dbo.SessoesContagem S
+                    ON S.ID_Sessao = C.ID_Sessao
+
+                WHERE
+                    S.ID_Inventario = ?
+                    AND S.ID_Rodada = ?
+                    AND S.ValidaParaConsolidacao = 1
+                    AND C.Status = 'ATIVA'
+
+                GROUP BY
+                    S.Localizacao,
+                    C.Codigo,
+                    ISNULL(C.Lote, '')
+            ),
+
+            Universo AS
+            (
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Snapshot
+
+                UNION
+
+                SELECT
+                    Localizacao,
+                    Codigo,
+                    Lote
+                FROM Contagem
+            )
+
+            SELECT
+                U.Localizacao,
+                U.Codigo,
+                U.Lote,
+
+                E.Produto,
+                E.Unidade,
+                E.Categoria,
+
+                ISNULL(E.QtdEstoque, 0) AS QtdEstoque,
+                ISNULL(C.QtdContada, 0) AS QtdContada,
+
+                CASE
+                    WHEN E.Codigo IS NULL THEN 0
+                    ELSE 1
+                END AS ExisteNoSnapshot
+
+            FROM Universo U
+
+            LEFT JOIN Snapshot E
+                ON E.Localizacao = U.Localizacao
+               AND E.Codigo = U.Codigo
+               AND E.Lote = U.Lote
+
+            LEFT JOIN Contagem C
+                ON C.Localizacao = U.Localizacao
+               AND C.Codigo = U.Codigo
+               AND C.Lote = U.Lote
+
+            ORDER BY
+                U.Localizacao,
+                U.Codigo,
+                U.Lote
+            """,
+            (
+                rodada.ID_Rodada,
+                rodada.ID_Rodada,
+                id_inventario,
+                id_inventario,
+                rodada.ID_Rodada
+            )
+        )
+
+    linhas = cursor.fetchall()
+
+    itens = []
+
+    # ========================================================
+    # 6. DECISÕES ATIVAS DO ROTATIVO
+    # ========================================================
+
+    decisoes_ativas = (
+        listar_decisoes_rotativo_ativas(
+            cursor=cursor,
+            id_inventario=id_inventario
+        )
+    )
+
+    mapa_decisoes = {}
+
+    for decisao in decisoes_ativas:
+
+        chave_decisao = (
+            _normalizar_localizacao(
+                decisao["localizacao"]
+            ),
+            _normalizar_texto(
+                decisao["codigo"]
+            ),
+            _normalizar_lote(
+                decisao["lote"]
+            ),
+        )
+
+        mapa_decisoes[
+            chave_decisao
+        ] = decisao
+
+    # ========================================================
+    # 7. ANALISA ITEM A ITEM
+    # ========================================================
+
+    for linha in linhas:
+
+        localizacao = (
+            _normalizar_localizacao(
+                linha.Localizacao
+            )
+        )
+
+        codigo = (
+            _normalizar_texto(
+                linha.Codigo
+            )
+        )
+
+        lote = (
+            _normalizar_lote(
+                linha.Lote
+            )
+        )
+
+        qtd_estoque = float(
+            linha.QtdEstoque
+        )
+
+        qtd_contada = float(
+            linha.QtdContada
+        )
+
+        existe_no_snapshot = bool(
+            linha.ExisteNoSnapshot
+        )
+
+        diferenca = (
+            qtd_contada
+            -
+            qtd_estoque
+        )
+
+        # ====================================================
+        # STATUS OPERACIONAL DA POSIÇÃO
+        # ====================================================
+
+        localizacao_info = next(
+            (
+                item
+                for item in localizacoes
+                if (
+                    item["localizacao"]
+                    == localizacao
+                )
+            ),
+            None
+        )
+
+        localizacao_concluida = bool(
+            localizacao_info
+            and
+            localizacao_info["status"]
+            == "CONCLUIDA"
+        )
+
+        # ====================================================
+        # STATUS DO ITEM
+        #
+        # Aqui conseguimos ser mais precisos que no OFICIAL:
+        #
+        # Como a localização faz parte da chave,
+        # se aquela localização já terminou,
+        # o item já pode ter resultado definitivo,
+        # mesmo que outras posições ainda estejam pendentes.
+        # ====================================================
+
+        localizacoes_esperadas = []
+        subtipo_divergencia = None
+
+        if not localizacao_concluida:
+
+            status = (
+                "AGUARDANDO_CONTAGEM"
+            )
+
+            resultado_definitivo = (
+                False
+            )
+
+        else:
+
+            diagnostico = classificar_item_rotativo(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                localizacao=localizacao,
+                codigo=codigo,
+                lote=lote,
+                qtd_estoque=qtd_estoque,
+                qtd_contada=qtd_contada,
+                existe_no_snapshot=existe_no_snapshot,
+            )
+
+            status = diagnostico["status"]
+
+            subtipo_divergencia = (
+                diagnostico["subtipo_divergencia"]
+            )
+
+            localizacoes_esperadas = (
+                diagnostico["localizacoes_esperadas"]
+            )
+
+            resultado_definitivo = (
+                True
+            )
+        # ====================================================
+        # HISTÓRICO DE DIVERGÊNCIAS
+        # ====================================================
+
+        historico_divergencias = None
+
+        if (
+            resultado_definitivo
+            and
+            status
+            in (
+                "FALTA",
+                "SOBRA",
+                "DIVERGÊNCIA"
+            )
+        ):
+
+            historico_divergencias = (
+                buscar_historico_divergencias(
+                    cursor=cursor,
+                    cliente_id=inventario.ClienteId,
+                    codigo=codigo,
+                    lote=lote,
+                    limite=10
+                )
+            )
+        # ====================================================
+        # DECISÃO ROTATIVO
+        # ====================================================
+
+        chave_decisao = (
+            localizacao,
+            codigo,
+            lote
+        )
+
+        decisao_rotativo = (
+            mapa_decisoes.get(
+                chave_decisao
+            )
+        )
+
+        requer_decisao = (
+            resultado_definitivo
+            and
+            status
+            in (
+                "FALTA",
+                "SOBRA",
+                "DIVERGÊNCIA"
+            )
+        )
+
+        decisao_tipo = None
+        justificativa = None
+        usuario_decisao = None
+        data_hora_decisao = None
+        id_decisao_rotativo = None
+
+        if decisao_rotativo:
+
+            decisao_tipo = (
+                decisao_rotativo[
+                    "decisao"
+                ]
+            )
+
+            justificativa = (
+                decisao_rotativo[
+                    "justificativa"
+                ]
+            )
+
+            usuario_decisao = (
+                decisao_rotativo[
+                    "usuario"
+                ]
+            )
+
+            data_hora_decisao = (
+                decisao_rotativo[
+                    "data_hora"
+                ]
+            )
+
+            id_decisao_rotativo = (
+                decisao_rotativo[
+                    "id_decisao_rotativo"
+                ]
+            )
+
+        pendente_decisao = (
+            requer_decisao
+            and
+            decisao_rotativo is None
+        )
+
+        pendente_recontagem = (
+            requer_decisao
+            and
+            decisao_tipo
+            ==
+            "RECONTAR"
+        )
+
+        divergencia_justificada = (
+            requer_decisao
+            and
+            decisao_tipo
+            ==
+            "JUSTIFICAR_DIVERGENCIA"
+        )
+
+        if status == "OK":
+
+            resolvido = True
+
+        elif divergencia_justificada:
+
+            resolvido = True
+
+        else:
+
+            resolvido = False
+
+        itens.append(
+            {
+                "chave":
+                    (
+                        f"{localizacao}|"
+                        f"{codigo}|"
+                        f"{lote}"
+                    ),
+
+                "localizacao":
+                    localizacao,
+
+                "codigo":
+                    codigo,
+
+                "produto":
+                    linha.Produto,
+
+                "lote":
+                    lote,
+
+                "unidade":
+                    linha.Unidade,
+
+                "categoria":
+                    linha.Categoria,
+
+                "qtd_estoque":
+                    qtd_estoque,
+
+                "qtd_contada":
+                    qtd_contada,
+
+                "existe_no_snapshot":
+                    existe_no_snapshot,
+
+                "diferenca":
+                    diferenca,
+
+                "status":
+                    status,
+
+                "subtipo_divergencia":
+                    subtipo_divergencia,
+
+                "localizacoes_esperadas":
+                    localizacoes_esperadas,
+
+                "resultado_definitivo":
+                    resultado_definitivo,
+
+                "historico_divergencias":
+                    historico_divergencias,
+
+                "requer_decisao":
+                    requer_decisao,
+
+                "pendente_decisao":
+                    pendente_decisao,
+
+                "resolvido":
+                    resolvido,
+
+                "pendente_recontagem":
+                    pendente_recontagem,
+
+                "divergencia_justificada":
+                    divergencia_justificada,
+
+                "decisao_rotativo": {
+                    "possui_decisao":
+                        decisao_rotativo
+                        is not None,
+
+                    "id_decisao_rotativo":
+                        id_decisao_rotativo,
+
+                    "decisao":
+                        decisao_tipo,
+
+                    "justificativa":
+                        justificativa,
+
+                    "usuario":
+                        usuario_decisao,
+
+                    "data_hora":
+                        data_hora_decisao
+                }
+            }
+        )
+
+    # ========================================================
+    # 8. CORRELACIONAR DIVERGÊNCIAS ENTRE LOTES
+    # ========================================================
+
+    itens = aplicar_diagnostico_lotes(
+        itens
+    )
+
+    # ========================================================
+    # 9. RESUMO
+    # ========================================================
+
+    total_itens = len(
+        itens
+    )
+
+    total_ok = sum(
+        1
+        for item in itens
+        if item["status"] == "OK"
+    )
+
+    total_faltas = sum(
+        1
+        for item in itens
+        if item["status"] == "FALTA"
+    )
+
+    total_sobras = sum(
+        1
+        for item in itens
+        if item["status"] == "SOBRA"
+    )
+
+    total_divergencias = sum(
+        1
+        for item in itens
+        if (
+            item["status"]
+            == "DIVERGÊNCIA"
+        )
+    )
+
+    total_localizacoes_incorretas = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "LOCALIZACAO_INCORRETA"
+        )
+    )
+
+    total_itens_nao_previstos = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "ITEM_NAO_PREVISTO"
+        )
+    )
+
+    total_itens_sem_saldo = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "ITEM_SEM_SALDO"
+        )
+    )
+
+    total_divergencias_quantidade = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "QUANTIDADE"
+            and item["status"] == "DIVERGÊNCIA"
+        )
+    )
+
+    total_lotes_incorretos = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "LOTE_INCORRETO"
+        )
+    )
+
+    total_lote_e_quantidade = sum(
+        1
+        for item in itens
+        if (
+            item.get("subtipo_divergencia")
+            == "LOTE_E_QUANTIDADE"
+        )
+    )
+
+    total_aguardando = sum(
+        1
+        for item in itens
+        if (
+            item["status"]
+            == "AGUARDANDO_CONTAGEM"
+        )
+    )
+
+    # ========================================================
+    # DECISÕES ROTATIVO
+    # ========================================================
+
+    itens_requerem_decisao = sum(
+        1
+        for item in itens
+        if item["requer_decisao"]
+    )
+
+    itens_sem_decisao = sum(
+        1
+        for item in itens
+        if item["pendente_decisao"]
+    )
+
+    itens_para_recontagem = sum(
+        1
+        for item in itens
+        if item["pendente_recontagem"]
+    )
+
+    divergencias_justificadas = sum(
+        1
+        for item in itens
+        if item["divergencia_justificada"]
+    )
+
+    itens_resolvidos = sum(
+        1
+        for item in itens
+        if item["resolvido"]
+    )
+
+    # ========================================================
+    # 9. PODE FINALIZAR / GERAR RECONTAGEM
+    # ========================================================
+
+    pode_finalizar = (
+        rodada_operacional_concluida
+        and
+        itens_sem_decisao == 0
+        and
+        itens_para_recontagem == 0
+    )
+
+    pode_gerar_recontagem = (
+        rodada_operacional_concluida
+        and
+        itens_para_recontagem > 0
+    )
+
+    # ========================================================
+    # 9. RETORNO
+    # ========================================================
+
+    return {
+        "tipo_analise":
+            "ROTATIVO",
+
+        "id_inventario":
+            inventario.ID_Inventario,
+
+        "codigo_inventario":
+            inventario.CodigoInventario,
+
+        "cliente_id":
+            inventario.ClienteId,
+
+        "status_inventario":
+            inventario.Status,
+
+        "id_rodada":
+            rodada.ID_Rodada,
+
+        "numero_rodada":
+            rodada.NumeroRodada,
+
+        "status_rodada":
+            rodada.Status,
+
+        "regra_conciliacao":
+            "LOCALIZACAO_CODIGO_LOTE",
+
+        "considera_localizacao":
+            True,
+
+        "contagem_cega":
+            True,
+
+        "rodada_operacional_concluida":
+            rodada_operacional_concluida,
+
+        "pode_finalizar_inventario":
+            pode_finalizar,
+
+        "pode_gerar_recontagem":
+            pode_gerar_recontagem,
+
+        "resumo": {
+            "total_itens":
+                total_itens,
+
+            "ok":
+                total_ok,
+
+            "faltas":
+                total_faltas,
+
+            "sobras":
+                total_sobras,
+
+            "divergencias":
+                total_divergencias,
+
+            "localizacoes_incorretas":
+                total_localizacoes_incorretas,
+
+            "itens_nao_previstos":
+                total_itens_nao_previstos,
+
+            "itens_sem_saldo":
+                total_itens_sem_saldo,
+
+            "divergencias_quantidade":
+                total_divergencias_quantidade,
+
+            "lotes_incorretos":
+                total_lotes_incorretos,
+
+            "lote_e_quantidade":
+                total_lote_e_quantidade,
+
+            "aguardando_contagem":
+                total_aguardando,
+
+            "itens_requerem_decisao":
+                itens_requerem_decisao,
+
+            "itens_sem_decisao":
+                itens_sem_decisao,
+
+            "itens_para_recontagem":
+                itens_para_recontagem,
+
+            "divergencias_justificadas":
+                divergencias_justificadas,
+
+            "itens_resolvidos":
+                itens_resolvidos,
+
+            "total_localizacoes":
+                total_localizacoes,
+
+            "localizacoes_concluidas":
+                total_concluidas,
+
+            "localizacoes_pendentes":
+                total_pendentes
+        },
+
+        "localizacoes":
+            localizacoes,
+
+        "itens":
+            itens
+    }

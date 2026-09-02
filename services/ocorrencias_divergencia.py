@@ -1,0 +1,1028 @@
+from domain.exceptions import BusinessRuleViolation, NotFoundError
+from fastapi import HTTPException
+
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def _normalizar_texto(valor):
+
+    if valor is None:
+        return ""
+
+    return str(valor).strip()
+
+
+def _normalizar_localizacao(valor):
+
+    texto = _normalizar_texto(valor)
+
+    if not texto:
+        return None
+
+    return texto.upper()
+
+
+def _normalizar_lote(valor):
+
+    return _normalizar_texto(valor)
+
+
+# ============================================================
+# REGISTRAR OCORRÊNCIA
+# ============================================================
+
+def registrar_ocorrencia_divergencia(
+    cursor,
+    cliente_id: int,
+    id_inventario: int,
+    id_rodada: int | None,
+    tipo_inventario: str,
+    localizacao,
+    codigo: str,
+    lote: str,
+    qtd_estoque: float,
+    qtd_contada: float,
+    tipo_divergencia: str,
+    usuario: str,
+    subtipo_divergencia: str | None = None
+):
+
+    tipo_inventario = (
+        _normalizar_texto(
+            tipo_inventario
+        )
+        .upper()
+    )
+
+    localizacao = (
+        _normalizar_localizacao(
+            localizacao
+        )
+    )
+
+    codigo = (
+        _normalizar_texto(
+            codigo
+        )
+    )
+
+    lote = (
+        _normalizar_lote(
+            lote
+        )
+    )
+
+    tipo_divergencia = (
+        _normalizar_texto(
+            tipo_divergencia
+        )
+        .upper()
+        .replace(
+            "Ê",
+            "E"
+        )
+    )
+
+    subtipo_divergencia = (
+        _normalizar_texto(
+            subtipo_divergencia
+        )
+        .upper()
+        or None
+    )
+
+    usuario = (
+        _normalizar_texto(
+            usuario
+        )
+    )
+
+    # ========================================================
+    # VALIDAÇÕES
+    # ========================================================
+
+    if tipo_divergencia == "DIVERGENCIA":
+        pass
+
+    elif tipo_divergencia not in (
+        "FALTA",
+        "SOBRA"
+    ):
+
+                raise BusinessRuleViolation(
+            "Tipo de divergência inválido."
+        )
+
+    if tipo_inventario not in (
+        "ROTATIVO",
+        "OFICIAL"
+    ):
+
+                raise BusinessRuleViolation(
+            "Tipo de inventário inválido."
+        )
+
+    if not codigo:
+
+                raise BusinessRuleViolation(
+            "Código obrigatório."
+        )
+
+    if not usuario:
+
+                raise BusinessRuleViolation(
+            "Usuário obrigatório."
+        )
+
+    qtd_estoque = float(
+        qtd_estoque
+    )
+
+    qtd_contada = float(
+        qtd_contada
+    )
+
+    diferenca = (
+        qtd_contada
+        -
+        qtd_estoque
+    )
+
+    # ========================================================
+    # EVITA DUPLICAR A MESMA OCORRÊNCIA
+    #
+    # Uma mesma divergência da mesma rodada não deve gerar
+    # várias ocorrências por consultas repetidas da análise.
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Ocorrencia,
+            StatusResolucao
+
+        FROM dbo.OcorrenciasDivergencia
+
+        WHERE
+            ID_Inventario = ?
+
+            AND ISNULL(
+                ID_Rodada,
+                0
+            ) = ISNULL(
+                ?,
+                0
+            )
+
+            AND ISNULL(
+                UPPER(
+                    LTRIM(
+                        RTRIM(Localizacao)
+                    )
+                ),
+                ''
+            ) = ISNULL(
+                ?,
+                ''
+            )
+
+            AND LTRIM(
+                RTRIM(Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(Lote)
+                ),
+                ''
+            ) = ?
+
+        ORDER BY
+            ID_Ocorrencia DESC
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            localizacao,
+            codigo,
+            lote
+        )
+    )
+
+    existente = (
+        cursor.fetchone()
+    )
+
+    if existente:
+
+        return {
+            "criada":
+                False,
+
+            "id_ocorrencia":
+                existente.ID_Ocorrencia,
+
+            "status_resolucao":
+                existente.StatusResolucao,
+
+            "mensagem":
+                "A ocorrência já existe."
+        }
+
+    # ========================================================
+    # INSERE OCORRÊNCIA
+    # ========================================================
+
+    cursor.execute(
+        """
+        INSERT INTO dbo.OcorrenciasDivergencia
+        (
+            ClienteId,
+            ID_Inventario,
+            ID_Rodada,
+            TipoInventario,
+            Localizacao,
+            Codigo,
+            Lote,
+            QtdEstoque,
+            QtdContada,
+            Diferenca,
+            TipoDivergencia,
+            SubtipoDivergencia,
+            StatusResolucao,
+            CriadoPor,
+            DataHoraCriacao
+        )
+
+        OUTPUT
+            INSERTED.ID_Ocorrencia,
+            INSERTED.DataHoraCriacao
+
+        VALUES
+        (
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            'PENDENTE',
+            ?,
+            SYSDATETIME()
+        )
+        """,
+        (
+            cliente_id,
+            id_inventario,
+            id_rodada,
+            tipo_inventario,
+            localizacao,
+            codigo,
+            lote,
+            qtd_estoque,
+            qtd_contada,
+            diferenca,
+            tipo_divergencia,
+            subtipo_divergencia,
+            usuario
+        )
+    )
+
+    nova = (
+        cursor.fetchone()
+    )
+
+    return {
+        "criada":
+            True,
+
+        "id_ocorrencia":
+            nova.ID_Ocorrencia,
+
+        "status_resolucao":
+            "PENDENTE",
+
+        "subtipo_divergencia":
+            subtipo_divergencia,
+
+        "data_hora":
+            nova.DataHoraCriacao
+    }
+
+
+# ============================================================
+# VINCULAR DECISÃO ROTATIVO
+# ============================================================
+
+def vincular_decisao_rotativo_ocorrencia(
+    cursor,
+    id_ocorrencia: int,
+    id_decisao_rotativo: int,
+    decisao: str,
+    justificativa,
+    usuario: str
+):
+
+    decisao = (
+        _normalizar_texto(
+            decisao
+        )
+        .upper()
+    )
+
+    justificativa = (
+        _normalizar_texto(
+            justificativa
+        )
+        or
+        None
+    )
+
+    usuario = (
+        _normalizar_texto(
+            usuario
+        )
+    )
+
+    # ========================================================
+    # DEFINE STATUS DA OCORRÊNCIA
+    # ========================================================
+
+    if decisao == "RECONTAR":
+
+        status_resolucao = (
+            "EM_RECONTAGEM"
+        )
+
+    elif decisao == (
+        "JUSTIFICAR_DIVERGENCIA"
+    ):
+
+        status_resolucao = (
+            "JUSTIFICADA"
+        )
+
+        if not justificativa:
+
+                        raise BusinessRuleViolation(
+                "Justificativa obrigatória."
+            )
+
+    else:
+
+                raise BusinessRuleViolation(
+            "Decisão inválida."
+        )
+
+    # ========================================================
+    # ATUALIZA OCORRÊNCIA
+    # ========================================================
+
+    cursor.execute(
+        """
+        UPDATE dbo.OcorrenciasDivergencia
+
+        SET
+            ID_DecisaoRotativo = ?,
+            StatusResolucao = ?,
+            Justificativa = ?
+
+        WHERE
+            ID_Ocorrencia = ?
+        """,
+        (
+            id_decisao_rotativo,
+            status_resolucao,
+            justificativa,
+            id_ocorrencia
+        )
+    )
+
+    if cursor.rowcount == 0:
+
+                raise NotFoundError(
+            "Ocorrência de divergência não encontrada."
+        )
+
+    return {
+        "id_ocorrencia":
+            id_ocorrencia,
+
+        "status_resolucao":
+            status_resolucao
+    }
+
+
+# ============================================================
+# CONFIRMAR DIVERGÊNCIA APÓS RECONTAGEM
+#
+# Regra:
+#
+# EM_RECONTAGEM
+# +
+# recontagem continua divergente
+# =
+# DIVERGENCIA_CONFIRMADA
+#
+# IMPORTANTE:
+# DIVERGENCIA_CONFIRMADA não significa que a divergência
+# foi resolvida.
+#
+# Portanto não preenche:
+# - TipoResolucao
+# - ResolvidoPor
+# - DataHoraResolucao
+# ============================================================
+
+def confirmar_divergencia_recontagem(
+    cursor,
+    id_ocorrencia: int,
+    id_rodada_confirmacao: int,
+    usuario: str,
+    observacao=None
+):
+
+    usuario = (
+        _normalizar_texto(
+            usuario
+        )
+        or
+        "sistema"
+    )
+
+    observacao = (
+        _normalizar_texto(
+            observacao
+        )
+        or
+        (
+            "Divergência confirmada após "
+            "recontagem do inventário."
+        )
+    )
+
+    # ========================================================
+    # VALIDAÇÕES
+    # ========================================================
+
+    if id_ocorrencia <= 0:
+
+                raise BusinessRuleViolation(
+            "Ocorrência inválida."
+        )
+
+    if id_rodada_confirmacao <= 0:
+
+                raise BusinessRuleViolation(
+            "Rodada de confirmação inválida."
+        )
+
+    # ========================================================
+    # VALIDA ESTADO ATUAL
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Ocorrencia,
+            StatusResolucao,
+            ID_DecisaoRotativo
+
+        FROM dbo.OcorrenciasDivergencia
+
+        WHERE
+            ID_Ocorrencia = ?
+        """,
+        id_ocorrencia
+    )
+
+    ocorrencia = (
+        cursor.fetchone()
+    )
+
+    if not ocorrencia:
+
+                raise NotFoundError(
+            "Ocorrência não encontrada."
+        )
+
+    status_atual = (
+        _normalizar_texto(
+            ocorrencia.StatusResolucao
+        )
+        .upper()
+    )
+
+    # ========================================================
+    # IDEMPOTÊNCIA
+    # ========================================================
+
+    if (
+        status_atual
+        ==
+        "DIVERGENCIA_CONFIRMADA"
+    ):
+
+        return {
+            "id_ocorrencia":
+                id_ocorrencia,
+
+            "status_resolucao":
+                "DIVERGENCIA_CONFIRMADA",
+
+            "id_rodada_confirmacao":
+                id_rodada_confirmacao,
+
+            "alterada":
+                False,
+
+            "mensagem":
+                "A divergência já está confirmada."
+        }
+
+    # ========================================================
+    # SOMENTE EM_RECONTAGEM PODE SER CONFIRMADA
+    # ========================================================
+
+    if status_atual != "EM_RECONTAGEM":
+
+                raise BusinessRuleViolation(
+            "Somente ocorrência EM_RECONTAGEM pode ser confirmada após recontagem."
+        )
+
+    # ========================================================
+    # CONFIRMA DIVERGÊNCIA
+    #
+    # Não é resolução.
+    # ========================================================
+
+    cursor.execute(
+        """
+        UPDATE dbo.OcorrenciasDivergencia
+
+        SET
+            StatusResolucao =
+                'DIVERGENCIA_CONFIRMADA',
+
+            ID_InventarioResolucao =
+                NULL,
+
+            ID_RodadaResolucao =
+                NULL,
+
+            TipoResolucao =
+                NULL,
+
+            ObservacaoResolucao =
+                ?,
+
+            ResolvidoPor =
+                NULL,
+
+            DataHoraResolucao =
+                NULL
+
+        WHERE
+            ID_Ocorrencia = ?
+
+            AND StatusResolucao =
+                'EM_RECONTAGEM'
+        """,
+        (
+            observacao,
+            id_ocorrencia
+        )
+    )
+
+    if cursor.rowcount == 0:
+
+                raise BusinessRuleViolation(
+            "Não foi possível confirmar a divergência."
+        )
+
+    return {
+        "id_ocorrencia":
+            id_ocorrencia,
+
+        "status_resolucao":
+            "DIVERGENCIA_CONFIRMADA",
+
+        "id_rodada_confirmacao":
+            id_rodada_confirmacao,
+
+        "usuario":
+            usuario,
+
+        "alterada":
+            True
+    }
+
+
+# ============================================================
+# RESOLVER OCORRÊNCIA
+#
+# Utilizado quando a divergência realmente foi resolvida.
+# ============================================================
+
+def resolver_ocorrencia_divergencia(
+    cursor,
+    id_ocorrencia: int,
+    tipo_resolucao: str,
+    usuario: str,
+    id_inventario_resolucao: int | None = None,
+    id_rodada_resolucao: int | None = None,
+    observacao=None
+):
+
+    tipo_resolucao = (
+        _normalizar_texto(
+            tipo_resolucao
+        )
+        .upper()
+    )
+
+    usuario = (
+        _normalizar_texto(
+            usuario
+        )
+    )
+
+    observacao = (
+        _normalizar_texto(
+            observacao
+        )
+        or
+        None
+    )
+
+    # ========================================================
+    # MAPA DE RESOLUÇÕES
+    # ========================================================
+
+    mapa_status = {
+        "RECONTAGEM":
+            "RESOLVIDA_RECONTAGEM",
+
+        "AJUSTE":
+            "RESOLVIDA_AJUSTE",
+
+        "OFICIAL":
+            "RESOLVIDA_OFICIAL",
+    }
+
+    if (
+        tipo_resolucao
+        not in mapa_status
+    ):
+
+                raise BusinessRuleViolation(
+            "Tipo de resolução inválido."
+        )
+
+    status_resolucao = (
+        mapa_status[
+            tipo_resolucao
+        ]
+    )
+
+    # ========================================================
+    # ATUALIZA OCORRÊNCIA
+    # ========================================================
+
+    cursor.execute(
+        """
+        UPDATE dbo.OcorrenciasDivergencia
+
+        SET
+            StatusResolucao = ?,
+            ID_InventarioResolucao = ?,
+            ID_RodadaResolucao = ?,
+            TipoResolucao = ?,
+            ObservacaoResolucao = ?,
+            ResolvidoPor = ?,
+            DataHoraResolucao = SYSDATETIME()
+
+        WHERE
+            ID_Ocorrencia = ?
+        """,
+        (
+            status_resolucao,
+            id_inventario_resolucao,
+            id_rodada_resolucao,
+            tipo_resolucao,
+            observacao,
+            usuario,
+            id_ocorrencia
+        )
+    )
+
+    if cursor.rowcount == 0:
+
+                raise NotFoundError(
+            "Ocorrência não encontrada."
+        )
+
+    return {
+        "id_ocorrencia":
+            id_ocorrencia,
+
+        "status_resolucao":
+            status_resolucao,
+
+        "tipo_resolucao":
+            tipo_resolucao
+    }
+
+
+# ============================================================
+# HISTÓRICO POR CLIENTE + CÓDIGO + LOTE
+# ============================================================
+
+def buscar_historico_divergencias(
+    cursor,
+    cliente_id: int,
+    codigo: str,
+    lote: str,
+    limite: int = 20
+):
+
+    codigo = (
+        _normalizar_texto(
+            codigo
+        )
+    )
+
+    lote = (
+        _normalizar_lote(
+            lote
+        )
+    )
+
+    limite = max(
+        1,
+        min(
+            int(limite),
+            100
+        )
+    )
+
+    # ========================================================
+    # CONSULTA HISTÓRICO
+    # ========================================================
+
+    cursor.execute(
+        f"""
+        SELECT TOP {limite}
+
+            O.ID_Ocorrencia,
+            O.ID_Inventario,
+            O.ID_Rodada,
+
+            I.CodigoInventario,
+
+            O.TipoInventario,
+            O.Localizacao,
+            O.Codigo,
+            O.Lote,
+
+            O.QtdEstoque,
+            O.QtdContada,
+            O.Diferenca,
+
+            O.TipoDivergencia,
+            O.SubtipoDivergencia,
+            O.StatusResolucao,
+
+            O.Justificativa,
+
+            O.TipoResolucao,
+            O.ObservacaoResolucao,
+
+            O.CriadoPor,
+            O.DataHoraCriacao,
+
+            O.ResolvidoPor,
+            O.DataHoraResolucao
+
+        FROM dbo.OcorrenciasDivergencia O
+
+        INNER JOIN dbo.Inventarios I
+            ON I.ID_Inventario =
+               O.ID_Inventario
+
+        WHERE
+            O.ClienteId = ?
+
+            AND LTRIM(
+                RTRIM(O.Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(O.Lote)
+                ),
+                ''
+            ) = ?
+
+        ORDER BY
+            O.DataHoraCriacao DESC,
+            O.ID_Ocorrencia DESC
+        """,
+        (
+            cliente_id,
+            codigo,
+            lote
+        )
+    )
+
+    linhas = (
+        cursor.fetchall()
+    )
+
+    ocorrencias = []
+
+    # ========================================================
+    # MONTA HISTÓRICO
+    # ========================================================
+
+    for linha in linhas:
+
+        status = (
+            _normalizar_texto(
+                linha.StatusResolucao
+            )
+            .upper()
+        )
+
+        # DIVERGENCIA_CONFIRMADA não é resolvida.
+        resolvida = (
+            status.startswith(
+                "RESOLVIDA_"
+            )
+        )
+
+        ocorrencias.append(
+            {
+                "id_ocorrencia":
+                    linha.ID_Ocorrencia,
+
+                "id_inventario":
+                    linha.ID_Inventario,
+
+                "codigo_inventario":
+                    linha.CodigoInventario,
+
+                "id_rodada":
+                    linha.ID_Rodada,
+
+                "tipo_inventario":
+                    linha.TipoInventario,
+
+                "localizacao":
+                    linha.Localizacao,
+
+                "codigo":
+                    linha.Codigo,
+
+                "lote":
+                    linha.Lote,
+
+                "qtd_estoque":
+                    float(
+                        linha.QtdEstoque
+                    ),
+
+                "qtd_contada":
+                    float(
+                        linha.QtdContada
+                    ),
+
+                "diferenca":
+                    float(
+                        linha.Diferenca
+                    ),
+
+                "tipo_divergencia":
+                    linha.TipoDivergencia,
+
+                "subtipo_divergencia":
+                    linha.SubtipoDivergencia,
+
+                "status_resolucao":
+                    status,
+
+                "resolvida":
+                    resolvida,
+
+                "justificativa":
+                    linha.Justificativa,
+
+                "tipo_resolucao":
+                    linha.TipoResolucao,
+
+                "observacao_resolucao":
+                    linha.ObservacaoResolucao,
+
+                "criado_por":
+                    linha.CriadoPor,
+
+                "data_hora_criacao":
+                    linha.DataHoraCriacao,
+
+                "resolvido_por":
+                    linha.ResolvidoPor,
+
+                "data_hora_resolucao":
+                    linha.DataHoraResolucao
+            }
+        )
+
+    # ========================================================
+    # RESUMO
+    # ========================================================
+
+    total = len(
+        ocorrencias
+    )
+
+    resolvidas = sum(
+        1
+        for item in ocorrencias
+        if item["resolvida"]
+    )
+
+    confirmadas = sum(
+        1
+        for item in ocorrencias
+        if (
+            item["status_resolucao"]
+            ==
+            "DIVERGENCIA_CONFIRMADA"
+        )
+    )
+
+    justificadas = sum(
+        1
+        for item in ocorrencias
+        if (
+            item["status_resolucao"]
+            ==
+            "JUSTIFICADA"
+        )
+    )
+
+    pendentes = sum(
+        1
+        for item in ocorrencias
+        if (
+            item["status_resolucao"]
+            in (
+                "PENDENTE",
+                "JUSTIFICADA",
+                "EM_RECONTAGEM"
+            )
+        )
+    )
+
+    # ========================================================
+    # RETORNO
+    # ========================================================
+
+    return {
+        "cliente_id":
+            cliente_id,
+
+        "codigo":
+            codigo,
+
+        "lote":
+            lote,
+
+        "resumo": {
+            "total_ocorrencias":
+                total,
+
+            "pendentes":
+                pendentes,
+
+            "justificadas":
+                justificadas,
+
+            "confirmadas":
+                confirmadas,
+
+            "resolvidas":
+                resolvidas
+        },
+
+        "ocorrencias":
+            ocorrencias
+    }

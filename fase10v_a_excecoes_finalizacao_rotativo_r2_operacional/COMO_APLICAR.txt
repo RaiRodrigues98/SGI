@@ -1,0 +1,90 @@
+FASE 10V-A - RODADAS / FINALIZAÇÃO ROTATIVO / R2 OPERACIONAL
+================================================================
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+└── _encerrar_inventario_rotativo_apos_r2()
+
+Recorte:
+HTTP 400
+"A R2 do inventário ROTATIVO ainda não foi concluída
+operacionalmente. Encerre todas as sessões e conclua todas
+as localizações previstas."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+POR QUE COMEÇAR POR ESSE ERRO
+-----------------------------
+É a validação mais isolada do encerramento R2:
+- ocorre antes da consolidação final;
+- não altera dados;
+- não depende de rowcount;
+- não muda regra de resultado final;
+- é uma regra operacional clara.
+
+A fase NÃO assume uma quantidade histórica fixa de
+HTTPException no módulo.
+
+O instalador lê o arquivo real no momento da execução e:
+- exige exatamente um erro alvo;
+- conta todos os HTTPException existentes;
+- converte somente o alvo;
+- exige queda exata de 1 no total;
+- imprime todos os demais erros preservados.
+
+Isso é intencional porque versões históricas do módulo tiveram
+perfis diferentes durante a refatoração.
+
+PRÉ-REQUISITO
+-------------
+10U-H aplicada:
+services\rodadas\criacao.py
+- 0 HTTPException
+- 0 FastAPI/Starlette
+
+PROTEÇÕES
+---------
+O instalador cria fingerprints antes/depois para:
+- SQL literals;
+- chamadas de negócio;
+- analisar_recontagem_rotativo;
+- consolidar_resultado_final_rotativo;
+- _finalizar_rodada_atual;
+- conexão/UoW/commit/rollback.
+
+Nenhum router é editado.
+O instalador exige que já exista uma fronteira:
+BusinessRuleViolation -> HTTP 400.
+
+FastAPI permanece no service enquanto houver qualquer
+HTTPException restante.
+
+Aplicar:
+python .\fase10v_a_excecoes_finalizacao_rotativo_r2_operacional\aplicar_fase10v_a.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Mapa global antes da 10V-A:
+HTTP imports          : 9
+HTTPException raises  : 125
+HTTPException handlers: 0
+ValueError/RuntimeError: 69
+Custom exception types: 6
+
+Impacto global esperado:
+HTTP imports:
+9 -> 9
+(a menos que, inesperadamente, esse fosse o último raise do módulo)
+
+HTTPException raises:
+125 -> 124
+
+ValueError/RuntimeError:
+69 -> 69
+
+A próxima 10V será escolhida a partir do perfil que o próprio
+instalador imprimir dos HTTPException restantes.

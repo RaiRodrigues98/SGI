@@ -1,0 +1,42 @@
+FASE 1 - REFATORAÇÃO DE RODADAS
+================================
+
+Objetivo:
+Extrair somente ITENS e LOCALIZAÇÕES do rodadas_service.py.
+
+Arquivos criados:
+services/
+├── rodadas_service.py
+└── rodadas/
+    ├── __init__.py
+    ├── itens.py
+    └── localizacoes.py
+
+IMPORTANTE:
+A versão de rodadas_service.py incluída neste pacote contém
+a proteção sp_getapplock do Estágio 14.
+
+COMO APLICAR
+------------
+
+1. Extraia esta pasta/pacote.
+
+2. Copie a pasta fase1_refatoracao_rodadas para a RAIZ do SGI
+   ou execute o instalador de dentro da pasta extraída.
+
+3. Na raiz do SGI, execute apontando para o instalador, por exemplo:
+
+   python .\fase1_refatoracao_rodadas\aplicar_fase1_rodadas.py
+
+4. O instalador fará backup automático do arquivo atual.
+
+5. Reinicie a API.
+
+6. Execute:
+
+   python tests_e2e\regressao_final_sgi.py
+
+Critério para continuar:
+RESULTADO FINAL: APROVADO PARA HOMOLOGAÇÃO CONTROLADA
+
+Não avance para a Fase 2 se houver qualquer FAIL.

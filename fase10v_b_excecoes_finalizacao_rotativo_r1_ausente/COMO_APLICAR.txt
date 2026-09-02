@@ -1,0 +1,71 @@
+FASE 10V-B - RODADAS / FINALIZAÇÃO ROTATIVO / R1 AUSENTE
+================================================================
+
+Alvo:
+services\rodadas\finalizacao_rotativo.py
+└── _encerrar_inventario_rotativo_apos_r2()
+
+Erro:
+HTTP 400
+"Não foi possível localizar a R1 do inventário ROTATIVO."
+
+Mapeamento:
+HTTP 400 -> BusinessRuleViolation
+
+RACIONAL
+--------
+A R2 não deveria existir sem uma R1 correspondente.
+Nesse ponto do fluxo, a ausência da R1 representa estado
+inconsistente do inventário, não um recurso solicitado pelo
+cliente. Por isso mantemos o contrato externo HTTP 400.
+
+PRÉ-REQUISITO
+-------------
+10V-A aplicada:
+o erro:
+"A R2 do inventário ROTATIVO ainda não foi concluída
+operacionalmente..."
+já deve estar como BusinessRuleViolation.
+
+Se 10V-A não estiver aplicada:
+- o instalador para antes de backup/mutação;
+- nenhum arquivo é alterado.
+
+PROTEÇÕES
+---------
+- altera somente 1 raise;
+- total global do módulo deve cair exatamente em 1;
+- SQL literal antes/depois deve ser idêntico;
+- chamadas de negócio antes/depois devem ser idênticas;
+- conexão/UoW/commit/rollback não podem mudar;
+- consolidar_resultado_final_rotativo preservado;
+- _finalizar_rodada_atual preservado;
+- nenhum router é editado;
+- FastAPI permanece enquanto existirem HTTPException.
+
+Aplicar:
+python .\fase10v_b_excecoes_finalizacao_rotativo_r1_ausente\aplicar_fase10v_b.py
+
+Depois:
+1. Reinicie a API.
+2. python tests_e2e\regressao_final_sgi.py
+3. python .\fase10a_auditoria_excecoes_dominio\auditar_fase10a.py
+
+Mapa global após 10V-A esperado:
+HTTP imports          : 9
+HTTPException raises  : 124
+HTTPException handlers: 0
+ValueError/RuntimeError: 69
+
+Após 10V-B:
+HTTP imports:
+9 -> 9
+
+HTTPException raises:
+124 -> 123
+
+ValueError/RuntimeError:
+69 -> 69
+
+A próxima 10V será escolhida entre os erros restantes
+impressos pelo instalador.
