@@ -37,7 +37,9 @@ def _buscar_inventarios_item(
     lote: str | None = None,
     cliente_id: int | None = None,
     data_inicio=None,
-    data_fim=None
+    data_fim=None,
+    page: int = 1,
+    page_size: int = 20
 ):
 
     filtros_inventario = []
@@ -136,6 +138,7 @@ def _buscar_inventarios_item(
 
     sql = f"""
         SELECT
+            COUNT(*) OVER() AS TotalRegistros,
             I.ID_Inventario,
             I.CodigoInventario,
             I.Tipo,
@@ -222,6 +225,9 @@ def _buscar_inventarios_item(
         ORDER BY
             I.DataHoraInicio DESC,
             I.ID_Inventario DESC
+
+        OFFSET ? ROWS
+        FETCH NEXT ? ROWS ONLY
     """
 
     parametros = []
@@ -235,6 +241,9 @@ def _buscar_inventarios_item(
     parametros.extend(
         parametros_inventario
     )
+
+    offset = (page - 1) * page_size
+    parametros.extend([offset, page_size])
 
     cursor.execute(
         sql,
@@ -1007,7 +1016,9 @@ def consultar_historico_item(
     lote: str | None = None,
     cliente_id: int | None = None,
     data_inicio=None,
-    data_fim=None
+    data_fim=None,
+    page: int = 1,
+    page_size: int = 20
 ):
 
     codigo = _normalizar_texto(
@@ -1024,6 +1035,19 @@ def consultar_historico_item(
             lote
         )
 
+    page = int(page)
+    page_size = int(page_size)
+
+    if page < 1:
+        raise BusinessRuleViolation(
+            "A página deve ser maior ou igual a 1."
+        )
+
+    if page_size < 1 or page_size > 200:
+        raise BusinessRuleViolation(
+            "O tamanho da página deve estar entre 1 e 200."
+        )
+
     inventarios_encontrados = (
         _buscar_inventarios_item(
             cursor=cursor,
@@ -1031,8 +1055,20 @@ def consultar_historico_item(
             lote=lote,
             cliente_id=cliente_id,
             data_inicio=data_inicio,
-            data_fim=data_fim
+            data_fim=data_fim,
+            page=page,
+            page_size=page_size
         )
+    )
+
+    total_registros = (
+        int(inventarios_encontrados[0].TotalRegistros)
+        if inventarios_encontrados
+        else 0
+    )
+
+    total_paginas = (
+        (total_registros + page_size - 1) // page_size
     )
 
     inventarios = []
@@ -1348,9 +1384,22 @@ def consultar_historico_item(
             "data_fim": data_fim
         },
 
+        "paginacao": {
+            "page": page,
+            "page_size": page_size,
+            "total_registros": total_registros,
+            "total_paginas": total_paginas,
+            "registros_pagina": len(inventarios),
+            "possui_proxima_pagina": page < total_paginas,
+            "possui_pagina_anterior": page > 1
+        },
+
         "resumo": {
             "inventarios_encontrados":
                 len(inventarios),
+
+            "inventarios_encontrados_total":
+                total_registros,
 
             "inventarios_com_resultado_final":
                 inventarios_com_resultado_final,

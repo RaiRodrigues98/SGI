@@ -140,6 +140,15 @@ def listar_historico_item(
     ),
     data_fim: date | None = Query(
         default=None
+    ),
+    page: int = Query(
+        default=1,
+        ge=1
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=200
     )
 ):
 
@@ -158,7 +167,9 @@ def listar_historico_item(
                 lote=lote,
                 cliente_id=cliente_id,
                 data_inicio=data_inicio,
-                data_fim=data_fim
+                data_fim=data_fim,
+                page=page,
+                page_size=page_size
             )
         )
 
@@ -213,6 +224,15 @@ def listar_historico_localizacao(
     ),
     data_fim: date | None = Query(
         default=None
+    ),
+    page: int = Query(
+        default=1,
+        ge=1
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=200
     )
 ):
 
@@ -231,7 +251,9 @@ def listar_historico_localizacao(
                 cliente_id=cliente_id,
                 tipo=tipo,
                 data_inicio=data_inicio,
-                data_fim=data_fim
+                data_fim=data_fim,
+                page=page,
+                page_size=page_size
             )
         )
 

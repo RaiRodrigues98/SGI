@@ -37,7 +37,9 @@ def _buscar_inventarios_localizacao(
     cliente_id: int | None = None,
     tipo: str | None = None,
     data_inicio=None,
-    data_fim=None
+    data_fim=None,
+    page: int = 1,
+    page_size: int = 20
 ):
 
     filtros = []
@@ -94,6 +96,7 @@ def _buscar_inventarios_localizacao(
 
     sql = f"""
         SELECT
+            COUNT(*) OVER() AS TotalRegistros,
             I.ID_Inventario,
             I.CodigoInventario,
             I.Tipo,
@@ -162,6 +165,9 @@ def _buscar_inventarios_localizacao(
         ORDER BY
             I.DataHoraInicio DESC,
             I.ID_Inventario DESC
+
+        OFFSET ? ROWS
+        FETCH NEXT ? ROWS ONLY
     """
 
     parametros = [
@@ -174,6 +180,9 @@ def _buscar_inventarios_localizacao(
     parametros.extend(
         parametros_filtros
     )
+
+    offset = (page - 1) * page_size
+    parametros.extend([offset, page_size])
 
     cursor.execute(
         sql,
@@ -1351,7 +1360,9 @@ def consultar_historico_localizacao(
     cliente_id: int | None = None,
     tipo: str | None = None,
     data_inicio=None,
-    data_fim=None
+    data_fim=None,
+    page: int = 1,
+    page_size: int = 20
 ):
 
     localizacao = (
@@ -1365,6 +1376,19 @@ def consultar_historico_localizacao(
             "A localização é obrigatória."
         )
 
+    page = int(page)
+    page_size = int(page_size)
+
+    if page < 1:
+        raise BusinessRuleViolation(
+            "A página deve ser maior ou igual a 1."
+        )
+
+    if page_size < 1 or page_size > 200:
+        raise BusinessRuleViolation(
+            "O tamanho da página deve estar entre 1 e 200."
+        )
+
     inventarios_banco = (
         _buscar_inventarios_localizacao(
             cursor=cursor,
@@ -1372,8 +1396,20 @@ def consultar_historico_localizacao(
             cliente_id=cliente_id,
             tipo=tipo,
             data_inicio=data_inicio,
-            data_fim=data_fim
+            data_fim=data_fim,
+            page=page,
+            page_size=page_size
         )
+    )
+
+    total_registros = (
+        int(inventarios_banco[0].TotalRegistros)
+        if inventarios_banco
+        else 0
+    )
+
+    total_paginas = (
+        (total_registros + page_size - 1) // page_size
     )
 
     inventarios = []
@@ -2008,9 +2044,22 @@ def consultar_historico_localizacao(
                 data_fim
         },
 
+        "paginacao": {
+            "page": page,
+            "page_size": page_size,
+            "total_registros": total_registros,
+            "total_paginas": total_paginas,
+            "registros_pagina": total_inventarios,
+            "possui_proxima_pagina": page < total_paginas,
+            "possui_pagina_anterior": page > 1
+        },
+
         "resumo": {
             "inventarios_encontrados":
                 total_inventarios,
+
+            "inventarios_encontrados_total":
+                total_registros,
 
             "inventarios_com_resultado_final":
                 inventarios_com_resultado_final,
