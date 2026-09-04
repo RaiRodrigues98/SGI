@@ -614,3 +614,181 @@ def remover_evidencia_plano(cursor, id_evidencia):
         raise ConflictError("Evidencia nao foi removida.")
 
     return evidencia
+
+# ============================================================
+# FASE 13.12.4A - CONSULTA DE OCORRENCIAS PARA TRATATIVAS
+# ============================================================
+
+def listar_ocorrencias_tratativas(
+    cursor,
+    cliente_id=None,
+    id_inventario=None,
+    status=None,
+    localizacao=None,
+    codigo=None,
+    somente_pendentes=True,
+    page=1,
+    page_size=50,
+):
+    try:
+        page = int(page)
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        raise BusinessRuleViolation("Paginacao invalida.")
+
+    if page < 1:
+        raise BusinessRuleViolation("Page deve ser maior ou igual a 1.")
+
+    if page_size < 1 or page_size > 100:
+        raise BusinessRuleViolation(
+            "PageSize deve estar entre 1 e 100."
+        )
+
+    filtros = []
+    parametros = []
+
+    if cliente_id is not None:
+        cliente_id = _b2_id(cliente_id, "ClienteId")
+        filtros.append("O.ClienteId = ?")
+        parametros.append(cliente_id)
+
+    if id_inventario is not None:
+        id_inventario = _b2_id(
+            id_inventario,
+            "ID_Inventario",
+        )
+        filtros.append("O.ID_Inventario = ?")
+        parametros.append(id_inventario)
+
+    status = _b2_opt(status, "Status", 30)
+
+    if status:
+        status = status.upper()
+        filtros.append(
+            "UPPER(LTRIM(RTRIM(O.StatusResolucao))) = ?"
+        )
+        parametros.append(status)
+
+    localizacao = _b2_opt(localizacao, "Localizacao", 100)
+
+    if localizacao:
+        filtros.append(
+            "UPPER(LTRIM(RTRIM(ISNULL(O.Localizacao, '')))) = ?"
+        )
+        parametros.append(localizacao.upper())
+
+    codigo = _b2_opt(codigo, "Codigo", 100)
+
+    if codigo:
+        filtros.append(
+            "UPPER(LTRIM(RTRIM(O.Codigo))) = ?"
+        )
+        parametros.append(codigo.upper())
+
+    if somente_pendentes:
+        filtros.append(
+            "O.DataHoraResolucao IS NULL"
+        )
+
+    where_sql = ""
+
+    if filtros:
+        where_sql = "WHERE " + " AND ".join(filtros)
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM dbo.OcorrenciasDivergencia O
+        {where_sql}
+        """,
+        tuple(parametros),
+    )
+
+    total_registros = int(
+        cursor.fetchone()[0]
+    )
+
+    total_paginas = (
+        (total_registros + page_size - 1)
+        // page_size
+        if total_registros
+        else 0
+    )
+
+    offset = (page - 1) * page_size
+
+    consulta_parametros = list(parametros)
+    consulta_parametros.extend(
+        [offset, page_size]
+    )
+
+    cursor.execute(
+        f"""
+        SELECT
+            O.ID_Ocorrencia AS id_ocorrencia,
+            O.ClienteId AS cliente_id,
+            O.ID_Inventario AS id_inventario,
+            O.ID_Rodada AS id_rodada,
+            O.TipoInventario AS tipo_inventario,
+            O.Localizacao AS localizacao,
+            O.Codigo AS codigo,
+            O.Lote AS lote,
+            O.QtdEstoque AS qtd_estoque,
+            O.QtdContada AS qtd_contada,
+            O.Diferenca AS diferenca,
+            O.TipoDivergencia AS tipo_divergencia,
+            O.SubtipoDivergencia AS subtipo_divergencia,
+            O.StatusResolucao AS status_resolucao,
+            O.Justificativa AS justificativa,
+            O.TipoResolucao AS tipo_resolucao,
+            O.ObservacaoResolucao AS observacao_resolucao,
+            O.CriadoPor AS criado_por,
+            O.DataHoraCriacao AS data_hora_criacao,
+            O.ResolvidoPor AS resolvido_por,
+            O.DataHoraResolucao AS data_hora_resolucao
+
+        FROM dbo.OcorrenciasDivergencia O
+
+        {where_sql}
+
+        ORDER BY
+            O.DataHoraCriacao DESC,
+            O.ID_Ocorrencia DESC
+
+        OFFSET ? ROWS
+        FETCH NEXT ? ROWS ONLY
+        """,
+        tuple(consulta_parametros),
+    )
+
+    ocorrencias = [
+        _b2_dict(cursor, row)
+        for row in cursor.fetchall()
+    ]
+
+    return {
+        "filtros": {
+            "cliente_id": cliente_id,
+            "id_inventario": id_inventario,
+            "status": status,
+            "localizacao": localizacao,
+            "codigo": codigo,
+            "somente_pendentes": bool(
+                somente_pendentes
+            ),
+        },
+        "paginacao": {
+            "page": page,
+            "page_size": page_size,
+            "total_registros": total_registros,
+            "total_paginas": total_paginas,
+            "registros_pagina": len(
+                ocorrencias
+            ),
+            "tem_anterior": page > 1,
+            "tem_proxima": (
+                page < total_paginas
+            ),
+        },
+        "ocorrencias": ocorrencias,
+    }

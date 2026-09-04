@@ -310,3 +310,65 @@ def remover_evidencia(
             id_evidencia=id_evidencia,
         )
     )
+
+# ============================================================
+# FASE 13.12.4A - CONSULTA DE OCORRENCIAS PARA TRATATIVAS
+# ============================================================
+
+from fastapi import Query as _tratativas_query
+from services.planos_acao import listar_ocorrencias_tratativas
+
+
+@router.get("/ocorrencias")
+def listar_ocorrencias_para_tratativa(
+    cliente_id: int | None = _tratativas_query(
+        default=None,
+        ge=1,
+    ),
+    id_inventario: int | None = _tratativas_query(
+        default=None,
+        ge=1,
+    ),
+    status: str | None = _tratativas_query(
+        default=None,
+        max_length=30,
+    ),
+    localizacao: str | None = _tratativas_query(
+        default=None,
+        max_length=100,
+    ),
+    codigo: str | None = _tratativas_query(
+        default=None,
+        max_length=100,
+    ),
+    somente_pendentes: bool = _tratativas_query(
+        default=True,
+    ),
+    page: int = _tratativas_query(
+        default=1,
+        ge=1,
+    ),
+    page_size: int = _tratativas_query(
+        default=50,
+        ge=1,
+        le=100,
+    ),
+    _usuario=Depends(
+        exigir_permissao(
+            "PLANO_ACAO_VISUALIZAR"
+        )
+    ),
+):
+    return _b2_leitura(
+        lambda cursor: listar_ocorrencias_tratativas(
+            cursor=cursor,
+            cliente_id=cliente_id,
+            id_inventario=id_inventario,
+            status=status,
+            localizacao=localizacao,
+            codigo=codigo,
+            somente_pendentes=somente_pendentes,
+            page=page,
+            page_size=page_size,
+        )
+    )
