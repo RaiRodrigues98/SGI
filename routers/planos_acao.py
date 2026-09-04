@@ -251,3 +251,62 @@ def atualizar_plano(id_plano: int, payload: PlanoAcaoAtualizacaoPayload, usuario
 def concluir_plano(id_plano: int, usuario=Depends(exigir_permissao("PLANO_ACAO_GERENCIAR"))):
     ator = _ator(usuario)
     return _b2_escrita(lambda c: concluir_plano_acao(c, id_plano, ator))
+
+# FASE 13.12.3B.3 - EVIDENCIAS
+from services.planos_acao import (
+    criar_evidencia_plano,
+    listar_evidencias_plano,
+    remover_evidencia_plano,
+)
+
+
+class EvidenciaPlanoPayload(BaseModel):
+    tipo_evidencia: str = Field(min_length=1, max_length=30)
+    descricao: str | None = Field(default=None, max_length=1000)
+    referencia_arquivo: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/planos-acao/{id_plano}/evidencias")
+def criar_evidencia(
+    id_plano: int,
+    payload: EvidenciaPlanoPayload,
+    usuario=Depends(exigir_permissao("PLANO_ACAO_GERENCIAR")),
+):
+    ator = _ator(usuario)
+
+    return _b2_escrita(
+        lambda cursor: criar_evidencia_plano(
+            cursor=cursor,
+            id_plano=id_plano,
+            tipo_evidencia=payload.tipo_evidencia,
+            descricao=payload.descricao,
+            referencia_arquivo=payload.referencia_arquivo,
+            ator=ator,
+        )
+    )
+
+
+@router.get("/planos-acao/{id_plano}/evidencias")
+def listar_evidencias(
+    id_plano: int,
+    _usuario=Depends(exigir_permissao("PLANO_ACAO_VISUALIZAR")),
+):
+    return _b2_leitura(
+        lambda cursor: listar_evidencias_plano(
+            cursor=cursor,
+            id_plano=id_plano,
+        )
+    )
+
+
+@router.delete("/evidencias/{id_evidencia}")
+def remover_evidencia(
+    id_evidencia: int,
+    _usuario=Depends(exigir_permissao("PLANO_ACAO_GERENCIAR")),
+):
+    return _b2_escrita(
+        lambda cursor: remover_evidencia_plano(
+            cursor=cursor,
+            id_evidencia=id_evidencia,
+        )
+    )

@@ -462,3 +462,155 @@ def concluir_plano_acao(cursor, id_plano, ator):
     if cursor.rowcount != 1:
         raise ConflictError("Plano de acao nao foi concluido.")
     return _b2_buscar_plano(cursor, id_plano)
+
+# FASE 13.12.3B.3 - EVIDENCIAS
+
+
+def _b3_buscar_evidencia(cursor, id_evidencia, bloquear=False):
+    id_evidencia = _b2_id(id_evidencia, "ID_Evidencia")
+    lock = " WITH (UPDLOCK, HOLDLOCK)" if bloquear else ""
+
+    cursor.execute(
+        f"""
+        SELECT
+            ID_Evidencia AS id_evidencia,
+            ID_PlanoAcao AS id_plano_acao,
+            TipoEvidencia AS tipo_evidencia,
+            Descricao AS descricao,
+            ReferenciaArquivo AS referencia_arquivo,
+            CriadoPor AS criado_por,
+            DataHoraCriacao AS data_hora_criacao
+        FROM dbo.PlanoAcaoEvidencias{lock}
+        WHERE ID_Evidencia = ?
+        """,
+        id_evidencia,
+    )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        raise NotFoundError("Evidencia nao encontrada.")
+
+    return _b2_dict(cursor, row)
+
+
+def criar_evidencia_plano(
+    cursor,
+    id_plano,
+    tipo_evidencia,
+    descricao,
+    referencia_arquivo,
+    ator,
+):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+    _b2_buscar_plano(cursor, id_plano)
+
+    tipo_evidencia = _b2_req(
+        tipo_evidencia,
+        "TipoEvidencia",
+        30,
+    )
+    descricao = _b2_opt(
+        descricao,
+        "Descricao",
+        1000,
+    )
+    referencia_arquivo = _b2_opt(
+        referencia_arquivo,
+        "ReferenciaArquivo",
+        1000,
+    )
+    ator = _b2_req(ator, "CriadoPor", 100)
+
+    if descricao is None and referencia_arquivo is None:
+        raise BusinessRuleViolation(
+            "Informe Descricao ou ReferenciaArquivo."
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO dbo.PlanoAcaoEvidencias
+        (
+            ID_PlanoAcao,
+            TipoEvidencia,
+            Descricao,
+            ReferenciaArquivo,
+            CriadoPor,
+            DataHoraCriacao
+        )
+        OUTPUT inserted.ID_Evidencia
+        VALUES
+        (
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            SYSDATETIME()
+        )
+        """,
+        id_plano,
+        tipo_evidencia,
+        descricao,
+        referencia_arquivo,
+        ator,
+    )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        raise ConflictError("Nao foi possivel criar a evidencia.")
+
+    return _b3_buscar_evidencia(cursor, int(row[0]))
+
+
+def listar_evidencias_plano(cursor, id_plano):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+    _b2_buscar_plano(cursor, id_plano)
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Evidencia AS id_evidencia,
+            ID_PlanoAcao AS id_plano_acao,
+            TipoEvidencia AS tipo_evidencia,
+            Descricao AS descricao,
+            ReferenciaArquivo AS referencia_arquivo,
+            CriadoPor AS criado_por,
+            DataHoraCriacao AS data_hora_criacao
+        FROM dbo.PlanoAcaoEvidencias
+        WHERE ID_PlanoAcao = ?
+        ORDER BY DataHoraCriacao DESC, ID_Evidencia DESC
+        """,
+        id_plano,
+    )
+
+    rows = cursor.fetchall()
+
+    return [
+        _b2_dict(cursor, row)
+        for row in rows
+    ]
+
+
+def remover_evidencia_plano(cursor, id_evidencia):
+    id_evidencia = _b2_id(id_evidencia, "ID_Evidencia")
+
+    evidencia = _b3_buscar_evidencia(
+        cursor,
+        id_evidencia,
+        bloquear=True,
+    )
+
+    cursor.execute(
+        """
+        DELETE FROM dbo.PlanoAcaoEvidencias
+        WHERE ID_Evidencia = ?
+        """,
+        id_evidencia,
+    )
+
+    if cursor.rowcount != 1:
+        raise ConflictError("Evidencia nao foi removida.")
+
+    return evidencia
