@@ -248,3 +248,217 @@ def encerrar_analise(cursor, id_analise, ator):
         raise ConflictError("A anÃ¡lise foi alterada por outra operaÃ§Ã£o.")
 
     return _buscar_analise(cursor, id_analise)
+
+# FASE 13.12.3B.2 - PLANOS DE ACAO
+from datetime import date as _b2_date
+
+_B2_PRIORIDADES = {"BAIXA", "MEDIA", "ALTA", "CRITICA"}
+_B2_STATUS = {"ABERTO", "EM_ANDAMENTO", "CONCLUIDO", "CANCELADO"}
+_B2_STATUS_EDITAVEIS = {"ABERTO", "EM_ANDAMENTO", "CANCELADO"}
+
+
+def _b2_id(valor, campo):
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        raise BusinessRuleViolation(f"{campo} deve ser um inteiro positivo.")
+    if numero <= 0:
+        raise BusinessRuleViolation(f"{campo} deve ser um inteiro positivo.")
+    return numero
+
+
+def _b2_req(valor, campo, limite):
+    texto = "" if valor is None else str(valor).strip()
+    if not texto:
+        raise BusinessRuleViolation(f"{campo} e obrigatorio.")
+    if len(texto) > limite:
+        raise BusinessRuleViolation(f"{campo} excede {limite} caracteres.")
+    return texto
+
+
+def _b2_opt(valor, campo, limite):
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    if len(texto) > limite:
+        raise BusinessRuleViolation(f"{campo} excede {limite} caracteres.")
+    return texto
+
+
+def _b2_prazo(valor):
+    if isinstance(valor, _b2_date):
+        return valor
+    texto = "" if valor is None else str(valor).strip()
+    if not texto:
+        raise BusinessRuleViolation("DataPrazo e obrigatoria.")
+    try:
+        return _b2_date.fromisoformat(texto)
+    except ValueError:
+        raise BusinessRuleViolation("DataPrazo deve estar no formato YYYY-MM-DD.")
+
+
+def _b2_prioridade(valor):
+    valor = _b2_req(valor, "Prioridade", 20).upper()
+    if valor not in _B2_PRIORIDADES:
+        raise BusinessRuleViolation("Prioridade deve ser BAIXA, MEDIA, ALTA ou CRITICA.")
+    return valor
+
+
+def _b2_status(valor):
+    valor = _b2_req(valor, "Status", 20).upper()
+    if valor not in _B2_STATUS:
+        raise BusinessRuleViolation("Status invalido.")
+    return valor
+
+
+def _b2_dict(cursor, row):
+    if row is None:
+        return None
+    return {d[0]: v for d, v in zip(cursor.description, row)}
+
+
+def _b2_validar_analise(cursor, id_analise):
+    id_analise = _b2_id(id_analise, "ID_Analise")
+    cursor.execute("SELECT ID_Analise FROM dbo.AnalisesOcorrencia WHERE ID_Analise = ?", id_analise)
+    if cursor.fetchone() is None:
+        raise NotFoundError("Analise de ocorrencia nao encontrada.")
+    return id_analise
+
+
+def _b2_buscar_plano(cursor, id_plano, bloquear=False):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+    lock = " WITH (UPDLOCK, HOLDLOCK)" if bloquear else ""
+    cursor.execute(f"""
+        SELECT
+            ID_PlanoAcao AS id_plano_acao,
+            ID_Analise AS id_analise,
+            DescricaoAcao AS descricao_acao,
+            Responsavel AS responsavel,
+            DataPrazo AS data_prazo,
+            Prioridade AS prioridade,
+            Status AS status,
+            Observacao AS observacao,
+            CriadoPor AS criado_por,
+            DataHoraCriacao AS data_hora_criacao,
+            AtualizadoPor AS atualizado_por,
+            DataHoraAtualizacao AS data_hora_atualizacao,
+            ConcluidoPor AS concluido_por,
+            DataHoraConclusao AS data_hora_conclusao
+        FROM dbo.PlanosAcaoOcorrencia{lock}
+        WHERE ID_PlanoAcao = ?
+    """, id_plano)
+    row = cursor.fetchone()
+    if row is None:
+        raise NotFoundError("Plano de acao nao encontrado.")
+    return _b2_dict(cursor, row)
+
+
+def criar_plano_acao(cursor, id_analise, descricao_acao, responsavel, data_prazo, prioridade, observacao, ator):
+    id_analise = _b2_validar_analise(cursor, id_analise)
+    descricao_acao = _b2_req(descricao_acao, "DescricaoAcao", 2000)
+    responsavel = _b2_req(responsavel, "Responsavel", 100)
+    data_prazo = _b2_prazo(data_prazo)
+    prioridade = _b2_prioridade(prioridade)
+    observacao = _b2_opt(observacao, "Observacao", 2000)
+    ator = _b2_req(ator, "CriadoPor", 100)
+
+    cursor.execute("""
+        INSERT INTO dbo.PlanosAcaoOcorrencia
+        (ID_Analise, DescricaoAcao, Responsavel, DataPrazo, Prioridade, Status, Observacao, CriadoPor, DataHoraCriacao)
+        OUTPUT inserted.ID_PlanoAcao
+        VALUES (?, ?, ?, ?, ?, 'ABERTO', ?, ?, SYSDATETIME())
+    """, id_analise, descricao_acao, responsavel, data_prazo, prioridade, observacao, ator)
+
+    row = cursor.fetchone()
+    if row is None:
+        raise ConflictError("Nao foi possivel criar o plano de acao.")
+    return _b2_buscar_plano(cursor, int(row[0]))
+
+
+def listar_planos_acao(cursor, id_analise):
+    id_analise = _b2_validar_analise(cursor, id_analise)
+    cursor.execute("""
+        SELECT
+            ID_PlanoAcao AS id_plano_acao,
+            ID_Analise AS id_analise,
+            DescricaoAcao AS descricao_acao,
+            Responsavel AS responsavel,
+            DataPrazo AS data_prazo,
+            Prioridade AS prioridade,
+            Status AS status,
+            Observacao AS observacao,
+            CriadoPor AS criado_por,
+            DataHoraCriacao AS data_hora_criacao,
+            AtualizadoPor AS atualizado_por,
+            DataHoraAtualizacao AS data_hora_atualizacao,
+            ConcluidoPor AS concluido_por,
+            DataHoraConclusao AS data_hora_conclusao
+        FROM dbo.PlanosAcaoOcorrencia
+        WHERE ID_Analise = ?
+        ORDER BY DataPrazo, ID_PlanoAcao
+    """, id_analise)
+    return [_b2_dict(cursor, row) for row in cursor.fetchall()]
+
+
+def consultar_plano_acao(cursor, id_plano):
+    return _b2_buscar_plano(cursor, id_plano)
+
+
+def atualizar_plano_acao(cursor, id_plano, descricao_acao, responsavel, data_prazo, prioridade, status, observacao, ator):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+    atual = _b2_buscar_plano(cursor, id_plano, bloquear=True)
+    atual_status = str(atual["status"]).strip().upper()
+
+    if atual_status in {"CONCLUIDO", "CANCELADO"}:
+        raise InvalidStateError(f"Plano de acao {atual_status} nao pode ser alterado.")
+
+    descricao_acao = _b2_req(descricao_acao, "DescricaoAcao", 2000)
+    responsavel = _b2_req(responsavel, "Responsavel", 100)
+    data_prazo = _b2_prazo(data_prazo)
+    prioridade = _b2_prioridade(prioridade)
+    novo_status = _b2_status(status)
+    observacao = _b2_opt(observacao, "Observacao", 2000)
+    ator = _b2_req(ator, "AtualizadoPor", 100)
+
+    if novo_status == "CONCLUIDO":
+        raise BusinessRuleViolation("Use o endpoint de conclusao para concluir o plano de acao.")
+    if novo_status not in _B2_STATUS_EDITAVEIS:
+        raise BusinessRuleViolation("Status de atualizacao invalido.")
+
+    cursor.execute("""
+        UPDATE dbo.PlanosAcaoOcorrencia
+        SET DescricaoAcao = ?, Responsavel = ?, DataPrazo = ?, Prioridade = ?, Status = ?,
+            Observacao = ?, AtualizadoPor = ?, DataHoraAtualizacao = SYSDATETIME()
+        WHERE ID_PlanoAcao = ?
+    """, descricao_acao, responsavel, data_prazo, prioridade, novo_status, observacao, ator, id_plano)
+
+    if cursor.rowcount != 1:
+        raise ConflictError("Plano de acao nao foi atualizado.")
+    return _b2_buscar_plano(cursor, id_plano)
+
+
+def concluir_plano_acao(cursor, id_plano, ator):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+    atual = _b2_buscar_plano(cursor, id_plano, bloquear=True)
+    status = str(atual["status"]).strip().upper()
+
+    if status == "CONCLUIDO":
+        raise InvalidStateError("Plano de acao ja esta concluido.")
+    if status == "CANCELADO":
+        raise InvalidStateError("Plano de acao cancelado nao pode ser concluido.")
+    if status not in {"ABERTO", "EM_ANDAMENTO"}:
+        raise InvalidStateError(f"Plano de acao em status {status} nao pode ser concluido.")
+
+    ator = _b2_req(ator, "ConcluidoPor", 100)
+    cursor.execute("""
+        UPDATE dbo.PlanosAcaoOcorrencia
+        SET Status = 'CONCLUIDO', AtualizadoPor = ?, DataHoraAtualizacao = SYSDATETIME(),
+            ConcluidoPor = ?, DataHoraConclusao = SYSDATETIME()
+        WHERE ID_PlanoAcao = ?
+    """, ator, ator, id_plano)
+
+    if cursor.rowcount != 1:
+        raise ConflictError("Plano de acao nao foi concluido.")
+    return _b2_buscar_plano(cursor, id_plano)
