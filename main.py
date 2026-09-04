@@ -43,6 +43,7 @@ from routers.rotativo_consulta import (
 )
 from routers.rotativo_priorizacao import router as rotativo_priorizacao
 from routers.auditoria import router as auditoria_router
+from routers.planos_acao import router as planos_acao_router
 # ============================================================
 # APLICAÇÃO
 # ============================================================
@@ -160,3 +161,4 @@ app.include_router(rotativo_priorizacao)
 app.include_router(
     auditoria_router
 )
+app.include_router(planos_acao_router)
