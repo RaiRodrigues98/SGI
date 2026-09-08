@@ -616,6 +616,243 @@ def remover_evidencia_plano(cursor, id_evidencia):
     return evidencia
 
 # ============================================================
+# FASE 13.12.3B.4 - VALIDACAO DE EFICACIA
+# ============================================================
+
+
+def criar_validacao_eficacia(
+    cursor,
+    id_plano,
+    resultado,
+    criterio_validacao,
+    observacao,
+    ator,
+):
+    id_plano = _b2_id(id_plano, "ID_PlanoAcao")
+
+    plano = _b2_buscar_plano(
+        cursor,
+        id_plano,
+        bloquear=True,
+    )
+
+    status_plano = str(
+        plano["status"]
+    ).strip().upper()
+
+    if status_plano != "CONCLUIDO":
+        raise InvalidStateError(
+            "Somente plano de acao CONCLUIDO pode receber validacao de eficacia."
+        )
+
+    resultado = _b2_req(
+        resultado,
+        "Resultado",
+        20,
+    ).upper()
+
+    if resultado not in {"EFICAZ", "INEFICAZ"}:
+        raise BusinessRuleViolation(
+            "Resultado deve ser EFICAZ ou INEFICAZ."
+        )
+
+    criterio_validacao = _b2_req(
+        criterio_validacao,
+        "CriterioValidacao",
+        2000,
+    )
+
+    observacao = _b2_opt(
+        observacao,
+        "Observacao",
+        2000,
+    )
+
+    ator = _b2_req(
+        ator,
+        "ValidadoPor",
+        100,
+    )
+
+    if resultado == "EFICAZ":
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.PlanosAcaoOcorrencia P
+            INNER JOIN dbo.AnalisesOcorrencia A
+                ON A.ID_Analise = P.ID_Analise
+            WHERE A.ID_Ocorrencia = (
+                SELECT ID_Ocorrencia
+                FROM dbo.AnalisesOcorrencia
+                WHERE ID_Analise = ?
+            )
+              AND P.ID_PlanoAcao <> ?
+              AND P.Status IN ('ABERTO', 'EM_ANDAMENTO')
+            """,
+            plano["id_analise"],
+            id_plano,
+        )
+
+        planos_ativos = int(cursor.fetchone()[0])
+
+        if planos_ativos > 0:
+            raise InvalidStateError(
+                "Nao e possivel encerrar a tratativa: existem outros planos de acao ativos."
+            )
+
+    cursor.execute(
+        """
+        INSERT INTO dbo.ValidacoesEficaciaPlano
+        (
+            ID_PlanoAcao,
+            Resultado,
+            CriterioValidacao,
+            Observacao,
+            ValidadoPor,
+            DataHoraValidacao,
+            DataHoraCriacao
+        )
+        OUTPUT inserted.ID_ValidacaoEficacia
+        VALUES
+        (
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            SYSDATETIME(),
+            SYSDATETIME()
+        )
+        """,
+        id_plano,
+        resultado,
+        criterio_validacao,
+        observacao,
+        ator,
+    )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        raise ConflictError(
+            "Nao foi possivel registrar a validacao de eficacia."
+        )
+
+    id_validacao = int(row[0])
+
+    if resultado == "EFICAZ":
+        cursor.execute(
+            """
+            SELECT
+                A.ID_Ocorrencia,
+                O.StatusResolucao
+            FROM dbo.AnalisesOcorrencia A
+            INNER JOIN dbo.OcorrenciasDivergencia O
+                ON O.ID_Ocorrencia = A.ID_Ocorrencia
+            WHERE A.ID_Analise = ?
+            """,
+            plano["id_analise"],
+        )
+
+        ocorrencia = cursor.fetchone()
+
+        if ocorrencia is None:
+            raise NotFoundError(
+                "Ocorrencia vinculada ao plano nao encontrada."
+            )
+
+        id_ocorrencia = int(ocorrencia[0])
+        status_ocorrencia = str(
+            ocorrencia[1] or ""
+        ).strip().upper()
+
+        if status_ocorrencia != "DIVERGENCIA_CONFIRMADA":
+            raise InvalidStateError(
+                "Somente ocorrencia com DIVERGENCIA_CONFIRMADA pode ser encerrada por eficacia."
+            )
+
+        from services.ocorrencias_divergencia import (
+            resolver_ocorrencia_divergencia,
+        )
+
+        resolver_ocorrencia_divergencia(
+            cursor=cursor,
+            id_ocorrencia=id_ocorrencia,
+            tipo_resolucao="EFICACIA",
+            usuario=ator,
+            observacao=(
+                f"Encerrada apos validacao de eficacia do plano #{id_plano}."
+            ),
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            ID_ValidacaoEficacia AS id_validacao_eficacia,
+            ID_PlanoAcao AS id_plano_acao,
+            Resultado AS resultado,
+            CriterioValidacao AS criterio_validacao,
+            Observacao AS observacao,
+            ValidadoPor AS validado_por,
+            DataHoraValidacao AS data_hora_validacao,
+            DataHoraCriacao AS data_hora_criacao
+        FROM dbo.ValidacoesEficaciaPlano
+        WHERE ID_ValidacaoEficacia = ?
+        """,
+        id_validacao,
+    )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        raise ConflictError(
+            "Validacao criada, mas nao foi possivel consulta-la."
+        )
+
+    return _b2_dict(cursor, row)
+
+
+def listar_validacoes_eficacia(
+    cursor,
+    id_plano,
+):
+    id_plano = _b2_id(
+        id_plano,
+        "ID_PlanoAcao",
+    )
+
+    _b2_buscar_plano(
+        cursor,
+        id_plano,
+    )
+
+    cursor.execute(
+        """
+        SELECT
+            ID_ValidacaoEficacia AS id_validacao_eficacia,
+            ID_PlanoAcao AS id_plano_acao,
+            Resultado AS resultado,
+            CriterioValidacao AS criterio_validacao,
+            Observacao AS observacao,
+            ValidadoPor AS validado_por,
+            DataHoraValidacao AS data_hora_validacao,
+            DataHoraCriacao AS data_hora_criacao
+        FROM dbo.ValidacoesEficaciaPlano
+        WHERE ID_PlanoAcao = ?
+        ORDER BY
+            DataHoraValidacao DESC,
+            ID_ValidacaoEficacia DESC
+        """,
+        id_plano,
+    )
+
+    return [
+        _b2_dict(cursor, row)
+        for row in cursor.fetchall()
+    ]
+
+
+# ============================================================
 # FASE 13.12.4A - CONSULTA DE OCORRENCIAS PARA TRATATIVAS
 # ============================================================
 

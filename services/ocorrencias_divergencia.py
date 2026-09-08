@@ -676,6 +676,9 @@ def resolver_ocorrencia_divergencia(
 
         "OFICIAL":
             "RESOLVIDA_OFICIAL",
+
+        "EFICACIA":
+            "RESOLVIDA_EFICACIA",
     }
 
     if (

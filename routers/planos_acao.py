@@ -312,6 +312,55 @@ def remover_evidencia(
     )
 
 # ============================================================
+# FASE 13.12.3B.4 - VALIDACAO DE EFICACIA
+# ============================================================
+
+from services.planos_acao import (
+    criar_validacao_eficacia,
+    listar_validacoes_eficacia,
+)
+
+
+class ValidacaoEficaciaPayload(BaseModel):
+    resultado: str = Field(min_length=1, max_length=20)
+    criterio_validacao: str = Field(min_length=1, max_length=2000)
+    observacao: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/planos-acao/{id_plano}/validacoes-eficacia")
+def criar_validacao_eficacia_plano(
+    id_plano: int,
+    payload: ValidacaoEficaciaPayload,
+    usuario=Depends(exigir_permissao("PLANO_ACAO_GERENCIAR")),
+):
+    ator = _ator(usuario)
+
+    return _b2_escrita(
+        lambda cursor: criar_validacao_eficacia(
+            cursor=cursor,
+            id_plano=id_plano,
+            resultado=payload.resultado,
+            criterio_validacao=payload.criterio_validacao,
+            observacao=payload.observacao,
+            ator=ator,
+        )
+    )
+
+
+@router.get("/planos-acao/{id_plano}/validacoes-eficacia")
+def listar_validacoes_eficacia_plano(
+    id_plano: int,
+    _usuario=Depends(exigir_permissao("PLANO_ACAO_VISUALIZAR")),
+):
+    return _b2_leitura(
+        lambda cursor: listar_validacoes_eficacia(
+            cursor=cursor,
+            id_plano=id_plano,
+        )
+    )
+
+
+# ============================================================
 # FASE 13.12.4A - CONSULTA DE OCORRENCIAS PARA TRATATIVAS
 # ============================================================
 
