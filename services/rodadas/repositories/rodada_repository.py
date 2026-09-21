@@ -219,3 +219,31 @@ def buscar_rodada_para_sincronizacao(
     )
 
     return cursor.fetchone()
+
+
+def listar_rodadas_inventario(
+    cursor,
+    id_inventario: int
+):
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Rodada,
+            ID_Inventario,
+            NumeroRodada,
+            Status
+
+        FROM dbo.RodadasInventario
+
+        WHERE ID_Inventario = ?
+
+        ORDER BY
+            NumeroRodada,
+            ID_Rodada
+        """,
+        id_inventario
+    )
+
+    return cursor.fetchall()
+

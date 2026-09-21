@@ -16,10 +16,12 @@ from dependencies.auth import (
 
 from schemas.rotativo import (
     DecisaoRotativoEntrada,
+    DecisaoRotativoLoteEntrada,
 )
 
 from services.decisoes_rotativo import (
     registrar_decisao_rotativo,
+    registrar_decisoes_rotativo_lote,
 )
 
 from services.rotativo_orquestrador import (
@@ -278,5 +280,236 @@ def registrar_decisao_rotativo_endpoint(
 
     finally:
 
+        if uow:
+            uow.close()
+
+
+
+# ============================================================
+# REGISTRAR DECISOES DO ROTATIVO EM LOTE
+# ============================================================
+
+@router.post(
+    "/inventarios/{id_inventario}/decisoes-rotativo/lote"
+)
+def registrar_decisoes_rotativo_lote_endpoint(
+    id_inventario: int,
+    dados: DecisaoRotativoLoteEntrada,
+    usuario_atual=Depends(
+        exigir_permissao(
+            "INVENTARIO_ROTATIVO_DECIDIR"
+        )
+    )
+):
+    if id_inventario <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Inventário inválido."
+        )
+
+    usuario = (
+        str(usuario_atual["login"])
+        .strip()
+    )
+
+    uow = None
+    conn = None
+    cursor = None
+
+    try:
+        uow = SqlServerUnitOfWork()
+        uow.open()
+
+        conn = uow.connection
+        cursor = uow.cursor
+
+        resultado = (
+            registrar_decisoes_rotativo_lote(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                id_rodada=dados.id_rodada,
+                itens=[
+                    {
+                        "localizacao":
+                            item.localizacao,
+                        "codigo":
+                            item.codigo,
+                        "lote":
+                            item.lote or "",
+                    }
+                    for item in dados.itens
+                ],
+                decisao=dados.decisao,
+                justificativa=dados.justificativa,
+                usuario=usuario,
+            )
+        )
+
+        # Todas as decisoes sao confirmadas juntas.
+        uow.commit()
+
+        decisao_normalizada = (
+            str(dados.decisao)
+            .strip()
+            .upper()
+        )
+
+        inteligencias = []
+
+        # A inteligencia continua sendo posterior ao commit,
+        # igual ao endpoint individual. Uma falha analitica
+        # nao desfaz as decisoes operacionais registradas.
+        if (
+            decisao_normalizada
+            ==
+            "JUSTIFICAR_DIVERGENCIA"
+        ):
+            for item_resultado in resultado[
+                "resultados"
+            ]:
+                try:
+                    inteligencia = (
+                        executar_orquestracao_rotativo(
+                            conn=conn,
+                            cursor=cursor,
+                            cliente_id=(
+                                item_resultado[
+                                    "cliente_id"
+                                ]
+                            ),
+                            armazem=(
+                                item_resultado[
+                                    "armazem"
+                                ]
+                            ),
+                            origem_evento=(
+                                "JUSTIFICATIVA_DIVERGENCIA"
+                            ),
+                            localizacao=(
+                                item_resultado[
+                                    "localizacao"
+                                ]
+                            ),
+                            id_ocorrencia=(
+                                item_resultado.get(
+                                    "id_ocorrencia"
+                                )
+                            ),
+                            id_inventario=id_inventario,
+                            id_rodada=dados.id_rodada,
+                            usuario=usuario,
+                            limite_score_sugestao=50.0,
+                            quantidade_sugestoes=20,
+                            retornar_painel=True,
+                        )
+                    )
+
+                    inteligencias.append(
+                        {
+                            "codigo":
+                                item_resultado[
+                                    "codigo"
+                                ],
+                            "localizacao":
+                                item_resultado[
+                                    "localizacao"
+                                ],
+                            "executada":
+                                bool(
+                                    inteligencia
+                                    and
+                                    inteligencia.get(
+                                        "orquestrado"
+                                    )
+                                ),
+                            "resultado":
+                                inteligencia,
+                            "erro":
+                                None,
+                        }
+                    )
+
+                except Exception as erro_inteligencia:
+                    inteligencias.append(
+                        {
+                            "codigo":
+                                item_resultado[
+                                    "codigo"
+                                ],
+                            "localizacao":
+                                item_resultado[
+                                    "localizacao"
+                                ],
+                            "executada":
+                                False,
+                            "resultado":
+                                None,
+                            "erro":
+                                str(
+                                    erro_inteligencia
+                                ),
+                        }
+                    )
+
+        resultado["inteligencia"] = {
+            "aplicavel": (
+                decisao_normalizada
+                ==
+                "JUSTIFICAR_DIVERGENCIA"
+            ),
+            "total_processado":
+                len(inteligencias),
+            "total_executado":
+                sum(
+                    1
+                    for item in inteligencias
+                    if item["executada"]
+                ),
+            "total_com_erro":
+                sum(
+                    1
+                    for item in inteligencias
+                    if item["erro"]
+                ),
+            "resultados":
+                inteligencias,
+        }
+
+        return resultado
+
+    except HTTPException:
+        if uow:
+            uow.rollback()
+
+        raise
+
+    except BusinessRuleViolation as erro:
+        if uow:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(erro)
+        )
+
+    except NotFoundError as erro:
+        if uow:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(erro)
+        )
+
+    except Exception as erro:
+        if uow:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
         if uow:
             uow.close()

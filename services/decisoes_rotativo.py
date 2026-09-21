@@ -836,3 +836,95 @@ def listar_decisoes_rotativo_ativas(
 
         for linha in linhas
     ]
+
+
+# ============================================================
+# REGISTRAR DECISOES ROTATIVO EM LOTE
+# ============================================================
+
+def registrar_decisoes_rotativo_lote(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    itens,
+    decisao: str,
+    justificativa,
+    usuario: str
+):
+    itens = list(itens or [])
+
+    if not itens:
+        raise BusinessRuleViolation(
+            "Selecione pelo menos uma divergência."
+        )
+
+    if len(itens) > 500:
+        raise BusinessRuleViolation(
+            "O limite por operação é de 500 divergências."
+        )
+
+    chaves = set()
+    resultados = []
+
+    for indice, item in enumerate(
+        itens,
+        start=1
+    ):
+        localizacao = _normalizar_localizacao(
+            item.get("localizacao")
+        )
+        codigo = _normalizar_texto(
+            item.get("codigo")
+        )
+        lote = _normalizar_lote(
+            item.get("lote")
+        )
+
+        chave = (
+            localizacao,
+            codigo,
+            lote
+        )
+
+        if chave in chaves:
+            raise BusinessRuleViolation(
+                "A seleção possui uma divergência duplicada: "
+                f"{codigo} · {localizacao} · lote {lote or '-'}."
+            )
+
+        chaves.add(chave)
+
+        try:
+            resultado = registrar_decisao_rotativo(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                id_rodada=id_rodada,
+                localizacao=localizacao,
+                codigo=codigo,
+                lote=lote,
+                decisao=decisao,
+                justificativa=justificativa,
+                usuario=usuario,
+            )
+        except (
+            BusinessRuleViolation,
+            NotFoundError
+        ) as erro:
+            raise type(erro)(
+                f"Item {indice} ({codigo or 'sem código'}): {erro}"
+            ) from erro
+
+        resultados.append(resultado)
+
+    return {
+        "sucesso": True,
+        "quantidade_processada": len(resultados),
+        "decisao": _normalizar_decisao(
+            decisao
+        ),
+        "resultados": resultados,
+        "mensagem": (
+            f"{len(resultados)} decisão(ões) "
+            "registrada(s) com sucesso."
+        ),
+    }

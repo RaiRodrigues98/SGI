@@ -1,6 +1,12 @@
 from domain.exceptions import BusinessRuleViolation
 from decimal import Decimal
 
+from services.rotativo_contexto import (
+    _buscar_ciclo_aberto,
+    _buscar_localizacao_rotativo,
+    _buscar_localizacao_ciclo,
+)
+
 
 # ============================================================
 # UTILITÁRIOS
@@ -19,6 +25,88 @@ def _normalizar(valor):
 # ============================================================
 # LOCALIZAÇÃO DO CICLO
 # ============================================================
+
+def resolver_localizacao_ciclo_operacional(
+    cursor,
+    cliente_id: int,
+    armazem: str,
+    localizacao: str
+):
+    """
+    Resolve a localiza??o operacional dentro do ciclo rotativo
+    ABERTO usando os cadastros j? existentes.
+
+    N?o realiza commit ou rollback.
+    """
+
+    cliente_id = int(
+        cliente_id
+        or 0
+    )
+
+    armazem = _normalizar(
+        armazem
+    )
+
+    localizacao = _normalizar(
+        localizacao
+    )
+
+    if cliente_id <= 0:
+        raise BusinessRuleViolation(
+            "Cliente inv?lido para o ciclo rotativo."
+        )
+
+    if not armazem:
+        raise BusinessRuleViolation(
+            "Armaz?m obrigat?rio para o ciclo rotativo."
+        )
+
+    if not localizacao:
+        raise BusinessRuleViolation(
+            "Localiza??o obrigat?ria para o ciclo rotativo."
+        )
+
+    ciclo = _buscar_ciclo_aberto(
+        cursor=cursor,
+        cliente_id=cliente_id,
+        armazem=armazem
+    )
+
+    if not ciclo:
+        raise BusinessRuleViolation(
+            "N?o existe ciclo rotativo ABERTO "
+            "para este cliente/armaz?m."
+        )
+
+    cadastro = _buscar_localizacao_rotativo(
+        cursor=cursor,
+        cliente_id=cliente_id,
+        armazem=armazem,
+        localizacao=localizacao
+    )
+
+    if not cadastro:
+        raise BusinessRuleViolation(
+            "Localiza??o n?o cadastrada no universo rotativo "
+            "deste cliente/armaz?m."
+        )
+
+    ciclo_localizacao = _buscar_localizacao_ciclo(
+        cursor=cursor,
+        id_ciclo=ciclo.ID_Ciclo,
+        id_rotativo_localizacao=(
+            cadastro.ID_RotativoLocalizacao
+        )
+    )
+
+    if not ciclo_localizacao:
+        raise BusinessRuleViolation(
+            "Localiza??o n?o pertence ao ciclo rotativo ABERTO."
+        )
+
+    return ciclo_localizacao
+
 
 def _buscar_localizacao_ciclo_por_id(
     cursor,

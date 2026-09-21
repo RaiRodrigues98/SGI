@@ -613,6 +613,46 @@ def alterar_senha_usuario(
 # LISTAR PERFIS DO USUÁRIO
 # ============================================================
 
+def listar_perfis_disponiveis(
+    cursor
+):
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Perfil,
+            Nome,
+            Descricao,
+            Ativo
+
+        FROM dbo.Perfis
+
+        WHERE Ativo = 1
+
+        ORDER BY Nome
+        """
+    )
+
+    linhas = cursor.fetchall()
+
+    return [
+        {
+            "id_perfil":
+                linha.ID_Perfil,
+
+            "nome":
+                linha.Nome,
+
+            "descricao":
+                linha.Descricao,
+
+            "ativo":
+                bool(linha.Ativo)
+        }
+        for linha in linhas
+    ]
+
+
 def listar_perfis_usuario(
     cursor,
     id_usuario: int

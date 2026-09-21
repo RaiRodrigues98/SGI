@@ -95,15 +95,62 @@ def listar_estoque_candidatos(
                 E.Validade,
                 E.qArmazenado,
                 E.qReservado,
+                E.qBloqueado,
+                E.qEstimado,
+
+                Preco.ValorUnitario,
+
+                CASE
+                    WHEN Preco.ValorUnitario IS NULL
+                    THEN NULL
+                    ELSE
+                        Preco.ValorUnitario
+                        *
+                        E.qArmazenado
+                END AS ValorTotalEstoque,
+
                 (
                     E.qArmazenado
                     -
                     E.qReservado
                 ) AS SaldoInventario,
+
                 E.StatusEstoque,
                 E.TipoLocalizacao
 
             FROM AlzarsiLog.dbo.Estoque E
+
+            INNER JOIN AlzarsiLog.dbo.Cliente C
+                ON C.Id = E.ClienteId
+
+            OUTER APPLY (
+                SELECT TOP 1
+                    RI.ValorUnitario
+
+                FROM AlzarsiLog.dbo.RecebimentoItem RI
+
+                INNER JOIN AlzarsiLog.dbo.Recebimento R
+                    ON R.Id = RI.RecebimentoId
+
+                WHERE
+                    R.CnpjCliente = C.Cnpj
+
+                    AND RI.CodigoItem = E.cItem
+
+                    AND ISNULL(
+                        LTRIM(RTRIM(RI.CodigoLote)),
+                        ''
+                    ) = ISNULL(
+                        LTRIM(RTRIM(E.cLote)),
+                        ''
+                    )
+
+                    AND RI.ValorUnitario IS NOT NULL
+
+                ORDER BY
+                    R.DataCriacao DESC,
+                    RI.Id DESC
+            ) Preco
 
             WHERE E.ClienteId = ?
               AND E.cArmazem = ?
@@ -181,12 +228,38 @@ def listar_estoque_candidatos(
                 "unidade": linha.cUnidade,
                 "categoria": linha.cCategoria,
                 "validade": linha.Validade,
+                "valor_unitario": (
+                    float(linha.ValorUnitario)
+                    if linha.ValorUnitario is not None
+                    else None
+                ),
+
+                "valor_total": (
+                    float(linha.ValorTotalEstoque)
+                    if linha.ValorTotalEstoque is not None
+                    else None
+                ),
+
                 "q_armazenado": float(
                     linha.qArmazenado
                 ),
+
                 "q_reservado": float(
                     linha.qReservado
                 ),
+
+                "q_separando": float(
+                    linha.qReservado
+                ),
+
+                "q_bloqueado": float(
+                    linha.qBloqueado
+                ),
+
+                "q_recebimento": float(
+                    linha.qEstimado
+                ),
+
                 "saldo_inventario": float(
                     linha.SaldoInventario
                 ),
@@ -519,8 +592,107 @@ def adicionar_localizacoes_escopo(
                 detail="Inventário não encontrado."
             )
 
+        # ====================================================
+        # ALTERACAO DO ESCOPO APOS SNAPSHOT
+        #
+        # Regra:
+        #
+        # - sem snapshot: permite normalmente;
+        # - com snapshot + configuracao desativada: bloqueia;
+        # - com snapshot + configuracao ativada:
+        #     somente permite antes da primeira sessao;
+        # - se o escopo realmente mudar, o snapshot antigo
+        #   sera invalidado antes do commit.
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.InventarioEstoqueSnapshot
+            WHERE ID_Inventario = ?
+            """,
+            id_inventario
+        )
+
+        total_snapshot = int(
+            cursor.fetchone()[0]
+        )
+
+        permitir_alteracao_apos_snapshot = False
+
+        if total_snapshot > 0:
+
+            cursor.execute(
+                """
+                SELECT TOP 1
+                    PermitirAlteracaoEscopoAposSnapshot
+
+                FROM dbo.ConfiguracoesInventario
+
+                WHERE
+                    ClienteId = ?
+                    AND UPPER(
+                        LTRIM(
+                            RTRIM(TipoInventario)
+                        )
+                    ) =
+                    UPPER(
+                        LTRIM(
+                            RTRIM(?)
+                        )
+                    )
+                    AND Ativa = 1
+
+                ORDER BY ID_Configuracao DESC
+                """,
+                (
+                    inventario.ClienteId,
+                    inventario.Tipo
+                )
+            )
+
+            configuracao_escopo = cursor.fetchone()
+
+            permitir_alteracao_apos_snapshot = bool(
+                configuracao_escopo
+                and configuracao_escopo
+                    .PermitirAlteracaoEscopoAposSnapshot
+            )
+
+            if not permitir_alteracao_apos_snapshot:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "O escopo não pode ser alterado "
+                        "após a geração do snapshot."
+                    )
+                )
+
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM dbo.SessoesContagem
+                WHERE ID_Inventario = ?
+                """,
+                id_inventario
+            )
+
+            total_sessoes = int(
+                cursor.fetchone()[0]
+            )
+
+            if total_sessoes > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "O escopo não pode ser alterado "
+                        "após o início da contagem."
+                    )
+                )
+
         validas = []
         invalidas = []
+        escopo_alterado = False
 
         for localizacao in localizacoes:
 
@@ -638,6 +810,8 @@ def adicionar_localizacoes_escopo(
                         localizacao
                     )
 
+                    escopo_alterado = True
+
             else:
 
                 cursor.execute(
@@ -669,6 +843,21 @@ def adicionar_localizacoes_escopo(
                 adicionadas.append(
                     localizacao
                 )
+
+                escopo_alterado = True
+
+        if (
+            total_snapshot > 0
+            and permitir_alteracao_apos_snapshot
+            and escopo_alterado
+        ):
+            cursor.execute(
+                """
+                DELETE FROM dbo.InventarioEstoqueSnapshot
+                WHERE ID_Inventario = ?
+                """,
+                id_inventario
+            )
 
         uow.commit()
 
@@ -730,6 +919,226 @@ def adicionar_localizacoes_escopo(
 # Permissão:
 # ANALISE_VISUALIZAR
 # ============================================================
+
+
+# ============================================================
+# STATUS OPERACIONAL DO ESCOPO
+#
+# Permissao:
+# ANALISE_VISUALIZAR
+#
+# Regra:
+# - Contagem iniciada: sempre bloqueia.
+# - Snapshot + configuracao desativada: bloqueia.
+# - Demais casos: permite alteracao.
+# ============================================================
+
+@router.get(
+    "/inventarios/{id_inventario}/escopo/status",
+    dependencies=[
+        Depends(
+            exigir_permissao(
+                "ANALISE_VISUALIZAR"
+            )
+        )
+    ]
+)
+def consultar_status_escopo_inventario(
+    id_inventario: int
+):
+
+    if id_inventario <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Invent\u00e1rio inv\u00e1lido."
+        )
+
+    uow = None
+    cursor = None
+
+    try:
+
+        uow = SqlServerUnitOfWork()
+        uow.open()
+        cursor = uow.cursor
+
+        # ----------------------------------------------------
+        # INVENTARIO
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                ID_Inventario,
+                ClienteId,
+                Tipo
+            FROM dbo.Inventarios
+            WHERE ID_Inventario = ?
+            """,
+            id_inventario
+        )
+
+        inventario = cursor.fetchone()
+
+        if not inventario:
+            raise HTTPException(
+                status_code=404,
+                detail="Invent\u00e1rio n\u00e3o encontrado."
+            )
+
+        # ----------------------------------------------------
+        # SNAPSHOT
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.InventarioEstoqueSnapshot
+            WHERE ID_Inventario = ?
+            """,
+            id_inventario
+        )
+
+        total_snapshot = int(
+            cursor.fetchone()[0]
+        )
+
+        snapshot_gerado = (
+            total_snapshot > 0
+        )
+
+        # ----------------------------------------------------
+        # CONFIGURACAO
+        # Mesma consulta utilizada na gravacao do escopo.
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT TOP 1
+                PermitirAlteracaoEscopoAposSnapshot
+
+            FROM dbo.ConfiguracoesInventario
+
+            WHERE
+                ClienteId = ?
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(TipoInventario)
+                    )
+                ) =
+                UPPER(
+                    LTRIM(
+                        RTRIM(?)
+                    )
+                )
+                AND Ativa = 1
+
+            ORDER BY ID_Configuracao DESC
+            """,
+            (
+                inventario.ClienteId,
+                inventario.Tipo
+            )
+        )
+
+        configuracao_escopo = (
+            cursor.fetchone()
+        )
+
+        permitir_alteracao_apos_snapshot = bool(
+            configuracao_escopo
+            and configuracao_escopo
+                .PermitirAlteracaoEscopoAposSnapshot
+        )
+
+        # ----------------------------------------------------
+        # CONTAGEM INICIADA
+        # Mesmo criterio utilizado na gravacao do escopo.
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.SessoesContagem
+            WHERE ID_Inventario = ?
+            """,
+            id_inventario
+        )
+
+        total_sessoes = int(
+            cursor.fetchone()[0]
+        )
+
+        contagem_iniciada = (
+            total_sessoes > 0
+        )
+
+        # ----------------------------------------------------
+        # REGRA EFETIVA
+        # ----------------------------------------------------
+
+        if contagem_iniciada:
+
+            pode_alterar_escopo = False
+            motivo_bloqueio = (
+                "CONTAGEM_INICIADA"
+            )
+
+        elif (
+            snapshot_gerado
+            and not permitir_alteracao_apos_snapshot
+        ):
+
+            pode_alterar_escopo = False
+            motivo_bloqueio = (
+                "SNAPSHOT_GERADO"
+            )
+
+        else:
+
+            pode_alterar_escopo = True
+            motivo_bloqueio = None
+
+        return {
+            "id_inventario":
+                id_inventario,
+
+            "snapshot_gerado":
+                snapshot_gerado,
+
+            "registros_snapshot":
+                total_snapshot,
+
+            "permitir_alteracao_apos_snapshot":
+                permitir_alteracao_apos_snapshot,
+
+            "contagem_iniciada":
+                contagem_iniciada,
+
+            "total_sessoes_contagem":
+                total_sessoes,
+
+            "pode_alterar_escopo":
+                pode_alterar_escopo,
+
+            "motivo_bloqueio":
+                motivo_bloqueio,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
+
+        if uow:
+            uow.close()
+
 
 @router.get(
     "/inventarios/{id_inventario}/escopo",
@@ -930,4 +1339,181 @@ def consultar_escopo_inventario(
     finally:
 
         if uow:
+            uow.close()
+
+
+# ============================================================
+# ESTOQUE ATUAL DO ARMAZEM
+# ============================================================
+#
+# Consulta operacional independente de inventario.
+#
+# Diferente de /inventarios/{id}/estoque-candidatos:
+# - nao depende de ID_Inventario
+# - nao limita pelo cliente do inventario
+# - pode retornar todos os clientes do armazem
+# - usa qArmazenado como estoque fisico atual
+#
+# Permissao:
+# ANALISE_VISUALIZAR
+# ============================================================
+
+@router.get(
+    "/estoque/atual",
+    dependencies=[
+        Depends(
+            exigir_permissao(
+                "ANALISE_VISUALIZAR"
+            )
+        )
+    ]
+)
+def listar_estoque_atual(
+    armazem: str,
+    cliente_id: int | None = None,
+    localizacao: str | None = None,
+    somente_com_estoque: bool = True,
+):
+    armazem = armazem.strip()
+
+    if not armazem:
+        raise HTTPException(
+            status_code=400,
+            detail="Armazem obrigatorio."
+        )
+
+    uow = None
+
+    try:
+        uow = SqlServerUnitOfWork()
+        uow.open()
+
+        cursor = uow.cursor
+
+        sql = """
+            SELECT
+                E.Id AS id,
+                E.cArmazem AS armazem,
+                E.cLocalizacao AS localizacao,
+                E.cItem AS codigo,
+                E.cLote AS lote,
+                E.ClienteId AS cliente_id,
+                C.Nome AS cliente,
+                E.dItem AS descricao,
+                E.cUnidade AS unidade,
+                E.cCategoria AS categoria,
+                E.Validade AS validade,
+
+                E.qArmazenado AS q_armazenado,
+                E.qReservado AS q_reservado,
+                E.qBloqueado AS q_bloqueado,
+                E.qEstimado AS q_estimado,
+
+                (
+                    ISNULL(E.qArmazenado, 0)
+                    -
+                    ISNULL(E.qReservado, 0)
+                ) AS saldo_disponivel,
+
+                E.StatusEstoque AS status_estoque,
+                E.TipoLocalizacao AS tipo_localizacao
+
+            FROM AlzarsiLog.dbo.Estoque E
+
+            INNER JOIN AlzarsiLog.dbo.Cliente C
+                ON C.Id = E.ClienteId
+
+            WHERE
+                E.cArmazem = ?
+        """
+
+        parametros = [
+            armazem
+        ]
+
+        if cliente_id is not None:
+            sql += """
+                AND E.ClienteId = ?
+            """
+
+            parametros.append(
+                cliente_id
+            )
+
+        if localizacao and localizacao.strip():
+            sql += """
+                AND E.cLocalizacao = ?
+            """
+
+            parametros.append(
+                localizacao.strip()
+            )
+
+        if somente_com_estoque:
+            sql += """
+                AND ISNULL(
+                    E.qArmazenado,
+                    0
+                ) <> 0
+            """
+
+        sql += """
+            ORDER BY
+                E.cLocalizacao,
+                E.ClienteId,
+                E.cItem,
+                E.cLote
+        """
+
+        cursor.execute(
+            sql,
+            *parametros
+        )
+
+        colunas = [
+            coluna[0]
+            for coluna
+            in cursor.description
+        ]
+
+        itens = [
+            dict(
+                zip(
+                    colunas,
+                    linha
+                )
+            )
+            for linha
+            in cursor.fetchall()
+        ]
+
+        return {
+            "armazem": armazem,
+            "cliente_id": cliente_id,
+            "localizacao": (
+                localizacao.strip()
+                if localizacao
+                else None
+            ),
+            "somente_com_estoque": (
+                somente_com_estoque
+            ),
+            "total": len(itens),
+            "itens": itens,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Erro ao consultar "
+                f"estoque atual: {erro}"
+            )
+        )
+
+    finally:
+        if uow is not None:
             uow.close()

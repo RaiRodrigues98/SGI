@@ -1,11 +1,22 @@
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     HTTPException,
 )
 from domain.exceptions import BusinessRuleViolation, NotFoundError
 
 from infrastructure.database.unit_of_work import SqlServerUnitOfWork
+
+from services.rotativo_fluxo import (
+    resolver_localizacao_ciclo_operacional,
+    iniciar_localizacao_rotativo,
+)
+
+from services.rotativo_cobertura import (
+    registrar_conclusao_localizacao_rotativo,
+    processar_inteligencia_conclusao_rotativo_background,
+)
 
 from dependencies.auth import (
     exigir_permissao,
@@ -19,6 +30,15 @@ from schemas.contagens import (
 
 from services.configuracoes_inventario import (
     obter_configuracao_por_inventario,
+)
+
+
+from services.notificacoes import (
+    criar_por_permissao,
+)
+
+from services.rodadas_service import (
+    visualizar_proxima_rodada,
 )
 
 
@@ -70,19 +90,72 @@ def _normalizar_upper(valor):
 # Nenhum saldo esperado é retornado.
 # ============================================================
 
-@router.post(
-    "/localizacoes/iniciar",
-    dependencies=[
-        Depends(
-            exigir_permissao(
-                "CONTAGEM_EXECUTAR"
-            )
+def _iniciar_ciclo_rotativo_da_localizacao(
+    cursor,
+    inventario,
+    id_rodada: int,
+    localizacao: str
+):
+    """
+    Integra a abertura operacional da localiza??o
+    com o ciclo ROTATIVO.
+
+    OFICIAL n?o sofre nenhuma altera??o.
+
+    N?o realiza commit/rollback.
+    """
+
+    tipo = _normalizar_upper(
+        inventario.Tipo
+    )
+
+    if tipo != "ROTATIVO":
+        return None
+
+    ciclo_localizacao = (
+        resolver_localizacao_ciclo_operacional(
+            cursor=cursor,
+            cliente_id=inventario.ClienteId,
+            armazem=inventario.cArmazem,
+            localizacao=localizacao
         )
-    ]
+    )
+
+    return iniciar_localizacao_rotativo(
+        cursor=cursor,
+        id_ciclo_localizacao=(
+            ciclo_localizacao.ID_CicloLocalizacao
+        ),
+        id_inventario=inventario.ID_Inventario,
+        id_rodada=id_rodada,
+        usuario=None
+    )
+
+
+@router.post(
+    "/localizacoes/iniciar"
 )
 def iniciar_localizacao(
-    dados: LocalizacaoEntrada
+    dados: LocalizacaoEntrada,
+    usuario_atual=Depends(
+        exigir_permissao(
+            "CONTAGEM_EXECUTAR"
+        )
+    )
 ):
+
+    usuario_id = int(
+        usuario_atual["id_usuario"]
+    )
+
+    usuario_login = str(
+        usuario_atual["login"]
+    ).strip()
+
+    usuario_nome = str(
+        usuario_atual.get("nome")
+        or usuario_login
+    ).strip()
 
     localizacao = _normalizar_upper(dados.localizacao)
 
@@ -122,6 +195,7 @@ def iniciar_localizacao(
                 CodigoInventario,
                 Tipo,
                 ClienteId,
+                cArmazem,
                 RodadaAtual,
                 Status
             FROM dbo.Inventarios WITH (UPDLOCK, HOLDLOCK)
@@ -298,7 +372,10 @@ def iniciar_localizacao(
                 Status,
                 DataHoraInicio,
                 DataHoraFim,
-                ValidaParaConsolidacao
+                ValidaParaConsolidacao,
+                ID_UsuarioAbertura,
+                UsuarioAberturaLogin,
+                UsuarioAberturaNome
             FROM dbo.SessoesContagem WITH (UPDLOCK, HOLDLOCK)
             WHERE
                 ID_Inventario = ?
@@ -319,6 +396,68 @@ def iniciar_localizacao(
             )
 
             if status_sessao_existente == "ABERTA":
+
+                operador_id = (
+                    int(existente.ID_UsuarioAbertura)
+                    if existente.ID_UsuarioAbertura is not None
+                    else None
+                )
+
+                operador_login = (
+                    str(existente.UsuarioAberturaLogin).strip()
+                    if existente.UsuarioAberturaLogin
+                    else None
+                )
+
+                operador_nome = (
+                    str(existente.UsuarioAberturaNome).strip()
+                    if existente.UsuarioAberturaNome
+                    else operador_login
+                )
+
+                mesma_pessoa = (
+                    operador_id == usuario_id
+                    if operador_id is not None
+                    else (
+                        operador_login is not None
+                        and operador_login.casefold()
+                        == usuario_login.casefold()
+                    )
+                )
+
+                if not mesma_pessoa:
+                    identificacao = (
+                        operador_nome
+                        or "outro usuário"
+                    )
+
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"A localização {localizacao} "
+                            "já está em contagem por "
+                            f"{identificacao}."
+                        )
+                    )
+
+                # ====================================================
+                # INTEGRACAO CICLO ROTATIVO - SESSAO EXISTENTE
+                # ====================================================
+
+                if (
+                    tipo_inventario == "ROTATIVO"
+                    and not rodada_recontagem
+                ):
+
+                    _iniciar_ciclo_rotativo_da_localizacao(
+                        cursor=cursor,
+                        inventario=inventario,
+                        id_rodada=dados.id_rodada,
+                        localizacao=localizacao
+                    )
+
+                    uow.commit()
+
                 return {
                     "sucesso": True,
                     "id_sessao": existente.ID_Sessao,
@@ -399,15 +538,31 @@ def iniciar_localizacao(
                     Localizacao,
                     Status,
                     LocalizacaoVazia,
-                    ValidaParaConsolidacao
+                    ValidaParaConsolidacao,
+                    ID_UsuarioAbertura,
+                    UsuarioAberturaLogin,
+                    UsuarioAberturaNome
                 )
                 OUTPUT
                     INSERTED.ID_Sessao,
                     INSERTED.DataHoraInicio
                 VALUES
-                (?, ?, ?, 'ABERTA', 0, 1)
+                (
+                    ?, ?, ?,
+                    'ABERTA',
+                    0,
+                    1,
+                    ?, ?, ?
+                )
                 """,
-                (dados.id_inventario, dados.id_rodada, localizacao)
+                (
+                    dados.id_inventario,
+                    dados.id_rodada,
+                    localizacao,
+                    usuario_id,
+                    usuario_login,
+                    usuario_nome
+                )
             )
             nova_sessao = cursor.fetchone()
 
@@ -436,6 +591,18 @@ def iniciar_localizacao(
                     AND UPPER(LTRIM(RTRIM(Localizacao))) = ?
                 """,
                 (dados.id_inventario, dados.id_rodada, localizacao)
+            )
+
+        # ========================================================
+        # INTEGRACAO CICLO ROTATIVO - NOVA SESSAO
+        # ========================================================
+
+        if not rodada_recontagem:
+            _iniciar_ciclo_rotativo_da_localizacao(
+                cursor=cursor,
+                inventario=inventario,
+                id_rodada=dados.id_rodada,
+                localizacao=localizacao
             )
 
         uow.commit()
@@ -512,17 +679,16 @@ def iniciar_localizacao(
 # ============================================================
 
 @router.post(
-    "/localizacoes/encerrar",
-    dependencies=[
-        Depends(
-            exigir_permissao(
-                "CONTAGEM_EXECUTAR"
-            )
-        )
-    ]
+    "/localizacoes/encerrar"
 )
 def encerrar_localizacao(
-    dados: EncerrarSessaoEntrada
+    dados: EncerrarSessaoEntrada,
+    background_tasks: BackgroundTasks,
+    usuario_atual=Depends(
+        exigir_permissao(
+            "CONTAGEM_EXECUTAR"
+        )
+    )
 ):
 
     if dados.id_sessao <= 0:
@@ -562,13 +728,19 @@ def encerrar_localizacao(
                 S.Status,
                 S.LocalizacaoVazia,
 
-                R.NumeroRodada
+                R.NumeroRodada,
+
+                I.Tipo AS TipoInventario
 
             FROM dbo.SessoesContagem S WITH (UPDLOCK, HOLDLOCK)
 
             INNER JOIN dbo.RodadasInventario R
                 ON R.ID_Rodada =
                    S.ID_Rodada
+
+            INNER JOIN dbo.Inventarios I
+                ON I.ID_Inventario =
+                   S.ID_Inventario
 
             WHERE S.ID_Sessao = ?
             """,
@@ -791,7 +963,382 @@ def encerrar_localizacao(
                 )
             )
 
+        # ========================================================
+        # INTEGRACAO CICLO ROTATIVO - CONCLUSAO
+        #
+        # O service de cobertura utiliza a MESMA conexao.
+        #
+        # Na primeira conclusao da localizacao ROTATIVA,
+        # o commit interno confirma atomicamente:
+        #
+        # - sessao ENCERRADA;
+        # - RodadaLocalizacoes CONCLUIDA, quando aplicavel;
+        # - cobertura do ciclo;
+        # - historico rotativo.
+        #
+        # Em R2, se a localizacao ja estiver CONTADA no ciclo,
+        # o service retorna de forma idempotente e o commit
+        # abaixo confirma somente a operacao da R2.
+        # ========================================================
+
+        cobertura_rotativo = None
+
+        if (
+            _normalizar_upper(
+                sessao.TipoInventario
+            )
+            == "ROTATIVO"
+        ):
+
+            cobertura_rotativo = (
+                registrar_conclusao_localizacao_rotativo(
+                    conn=conn,
+                    cursor=cursor,
+                    id_sessao=sessao.ID_Sessao,
+                    usuario=None,
+                    processar_inteligencia=False
+                )
+            )
+
+        notificacoes_geradas = []
+
+        # ====================================================
+        # VERIFICA SE TODA A RODADA FOI CONCLUIDA
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.RodadaLocalizacoes
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+            """,
+            (
+                sessao.ID_Inventario,
+                sessao.ID_Rodada,
+            ),
+        )
+
+        total_planejadas = int(
+            cursor.fetchone()[0]
+        )
+
+        if total_planejadas > 0:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM dbo.RodadaLocalizacoes
+                WHERE
+                    ID_Inventario = ?
+                    AND ID_Rodada = ?
+                    AND Status = 'CONCLUIDA'
+                """,
+                (
+                    sessao.ID_Inventario,
+                    sessao.ID_Rodada,
+                ),
+            )
+
+            total_concluidas = int(
+                cursor.fetchone()[0]
+            )
+
+        else:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM dbo.InventarioEscopoLocalizacoes
+                WHERE
+                    ID_Inventario = ?
+                    AND Selecionado = 1
+                """,
+                sessao.ID_Inventario,
+            )
+
+            total_planejadas = int(
+                cursor.fetchone()[0]
+            )
+
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+
+                FROM dbo.InventarioEscopoLocalizacoes E
+
+                WHERE
+                    E.ID_Inventario = ?
+                    AND E.Selecionado = 1
+
+                    AND EXISTS
+                    (
+                        SELECT 1
+
+                        FROM dbo.SessoesContagem S
+
+                        WHERE
+                            S.ID_Inventario =
+                                E.ID_Inventario
+
+                            AND S.ID_Rodada = ?
+
+                            AND S.ValidaParaConsolidacao = 1
+
+                            AND S.Status = 'ENCERRADA'
+
+                            AND UPPER(
+                                LTRIM(
+                                    RTRIM(S.Localizacao)
+                                )
+                            ) =
+                            UPPER(
+                                LTRIM(
+                                    RTRIM(E.Localizacao)
+                                )
+                            )
+                    )
+                """,
+                (
+                    sessao.ID_Inventario,
+                    sessao.ID_Rodada,
+                ),
+            )
+
+            total_concluidas = int(
+                cursor.fetchone()[0]
+            )
+
+        rodada_concluida = (
+            total_planejadas > 0
+            and
+            total_concluidas >= total_planejadas
+        )
+
+        if rodada_concluida:
+            cursor.execute(
+                """
+                SELECT
+                    ID_Inventario,
+                    CodigoInventario,
+                    Tipo,
+                    ClienteId,
+                    RodadaAtual,
+                    Status
+
+                FROM dbo.Inventarios
+
+                WHERE ID_Inventario = ?
+                """,
+                sessao.ID_Inventario,
+            )
+
+            inventario_atual = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT
+                    ID_Rodada,
+                    ID_Inventario,
+                    NumeroRodada,
+                    Status,
+                    DataHoraInicio
+
+                FROM dbo.RodadasInventario
+
+                WHERE ID_Rodada = ?
+                """,
+                sessao.ID_Rodada,
+            )
+
+            rodada_atual = cursor.fetchone()
+
+            numero_rodada = int(
+                sessao.NumeroRodada
+            )
+
+            if numero_rodada > 1:
+                tipo_evento = (
+                    "RECONTAGEM_CONCLUIDA"
+                )
+                titulo_evento = (
+                    "Recontagem conclu\u00edda"
+                )
+            else:
+                tipo_evento = (
+                    "RODADA_CONCLUIDA"
+                )
+                titulo_evento = (
+                    "Rodada de contagem conclu\u00edda"
+                )
+
+            resumo_rodada = criar_por_permissao(
+                cursor=cursor,
+                codigo_permissao=(
+                    "ANALISE_VISUALIZAR"
+                ),
+                id_usuario_ator=int(
+                    usuario_atual["id_usuario"]
+                ),
+                tipo=tipo_evento,
+                titulo=titulo_evento,
+                mensagem=(
+                    f"A rodada R{numero_rodada} "
+                    f"do invent\u00e1rio "
+                    f"{inventario_atual.CodigoInventario} "
+                    f"foi conclu\u00edda e est\u00e1 "
+                    f"pronta para an\u00e1lise."
+                ),
+                prioridade="ALTA",
+                entidade_tipo="RODADA",
+                entidade_id=int(
+                    sessao.ID_Rodada
+                ),
+                id_inventario=int(
+                    sessao.ID_Inventario
+                ),
+                url=(
+                    f"/inventarios/"
+                    f"{sessao.ID_Inventario}"
+                ),
+                chave_dedupe=(
+                    f"{tipo_evento}:"
+                    f"{sessao.ID_Inventario}:"
+                    f"{sessao.ID_Rodada}"
+                ),
+                excluir_ator=False,
+            )
+
+            notificacoes_geradas.append(
+                {
+                    "tipo": tipo_evento,
+                    **resumo_rodada,
+                }
+            )
+
+            # ================================================
+            # OFICIAL PRONTO PARA FINALIZAR
+            # ================================================
+
+            if (
+                str(inventario_atual.Tipo)
+                .strip()
+                .upper()
+                == "OFICIAL"
+            ):
+                preview = None
+
+                try:
+                    preview = visualizar_proxima_rodada(
+                        cursor=cursor,
+                        inventario=inventario_atual,
+                        rodada_atual=rodada_atual,
+                    )
+                except (
+                    BusinessRuleViolation,
+                    NotFoundError,
+                ):
+                    preview = None
+
+                if isinstance(preview, dict):
+                    tipo_proxima = str(
+                        preview.get(
+                            "tipo_proxima_rodada"
+                        )
+                        or preview.get(
+                            "proxima_acao"
+                        )
+                        or ""
+                    ).strip().upper()
+
+                    pronto_finalizar = bool(
+                        preview.get(
+                            "pode_finalizar",
+                            False,
+                        )
+                    ) or tipo_proxima in {
+                        "FINALIZADO",
+                        "FINALIZAR",
+                    }
+
+                    if pronto_finalizar:
+                        resumo_finalizar = (
+                            criar_por_permissao(
+                                cursor=cursor,
+                                codigo_permissao=(
+                                    "INVENTARIO_FINALIZAR"
+                                ),
+                                id_usuario_ator=int(
+                                    usuario_atual[
+                                        "id_usuario"
+                                    ]
+                                ),
+                                tipo=(
+                                    "INVENTARIO_PRONTO_FINALIZAR"
+                                ),
+                                titulo=(
+                                    "Invent\u00e1rio pronto "
+                                    "para finalizar"
+                                ),
+                                mensagem=(
+                                    f"O invent\u00e1rio "
+                                    f"{inventario_atual.CodigoInventario} "
+                                    f"concluiu todas as "
+                                    f"etapas necess\u00e1rias."
+                                ),
+                                prioridade="ALTA",
+                                entidade_tipo=(
+                                    "INVENTARIO"
+                                ),
+                                entidade_id=int(
+                                    sessao.ID_Inventario
+                                ),
+                                id_inventario=int(
+                                    sessao.ID_Inventario
+                                ),
+                                url=(
+                                    f"/inventarios/"
+                                    f"{sessao.ID_Inventario}"
+                                ),
+                                chave_dedupe=(
+                                    "INVENTARIO_PRONTO_FINALIZAR:"
+                                    f"{sessao.ID_Inventario}"
+                                ),
+                                excluir_ator=False,
+                            )
+                        )
+
+                        notificacoes_geradas.append(
+                            {
+                                "tipo": (
+                                    "INVENTARIO_PRONTO_FINALIZAR"
+                                ),
+                                **resumo_finalizar,
+                            }
+                        )
+
         uow.commit()
+
+        # ====================================================
+        # INTELIGENCIA ROTATIVA POS-RESPOSTA
+        #
+        # A cobertura operacional ja foi persistida.
+        # A parte analitica utiliza uma nova conexao SQL
+        # e nao bloqueia a resposta ao operador.
+        #
+        # Em R2, quando a localizacao ja estava CONTADA no
+        # ciclo, o service retorna registrado=False e preserva
+        # o comportamento idempotente existente.
+        # ====================================================
+
+        if (
+            cobertura_rotativo
+            and cobertura_rotativo.get("registrado") is True
+        ):
+            background_tasks.add_task(
+                processar_inteligencia_conclusao_rotativo_background,
+                id_sessao=sessao.ID_Sessao,
+                usuario=None
+            )
 
         return {
             "sucesso":
@@ -827,6 +1374,15 @@ def encerrar_localizacao(
                     if rodada_localizacao
                     else None
                 ),
+
+            "cobertura_rotativo":
+                cobertura_rotativo,
+
+            "rodada_concluida":
+                rodada_concluida,
+
+            "notificacoes":
+                notificacoes_geradas,
 
             "mensagem":
                 (
@@ -891,22 +1447,27 @@ def encerrar_localizacao(
 # ============================================================
 
 @router.post(
-    "/contagens",
-    dependencies=[
-        Depends(
-            exigir_permissao(
-                "CONTAGEM_EXECUTAR"
-            )
-        )
-    ]
+    "/contagens"
 )
 def salvar_contagem(
-    contagem: ContagemEntrada
+    contagem: ContagemEntrada,
+    usuario_atual=Depends(
+        exigir_permissao(
+            "CONTAGEM_EXECUTAR"
+        )
+    )
 ):
 
     # ========================================================
     # 1. NORMALIZAÇÃO
     # ========================================================
+
+    criado_por = (
+        str(
+            usuario_atual["login"]
+        )
+        .strip()
+    )
 
     codigo = (
         _normalizar_texto(
@@ -1529,7 +2090,8 @@ def salvar_contagem(
                 Codigo,
                 Lote,
                 Quantidade,
-                Status
+                Status,
+                CriadoPor
             )
 
             OUTPUT
@@ -1543,14 +2105,16 @@ def salvar_contagem(
                 ?,
                 ?,
                 ?,
-                'ATIVA'
+                'ATIVA',
+                ?
             )
             """,
             (
                 contagem.id_sessao,
                 codigo,
                 lote,
-                contagem.quantidade
+                contagem.quantidade,
+                criado_por
             )
         )
 

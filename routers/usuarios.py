@@ -18,6 +18,7 @@ from infrastructure.database.unit_of_work import (
 
 from dependencies.auth import (
     exigir_permissao,
+    obter_usuario_atual,
 )
 
 from schemas.usuarios import (
@@ -34,6 +35,7 @@ from services.usuarios import (
     atualizar_usuario,
     alterar_senha_usuario,
     listar_perfis_usuario,
+    listar_perfis_disponiveis,
     vincular_perfil_usuario,
     remover_perfil_usuario,
     listar_permissoes_usuario,
@@ -223,6 +225,37 @@ def listar(
 # CONSULTAR USUÁRIO
 # ============================================================
 
+# ============================================================
+# PERFIS DISPONIVEIS
+# ============================================================
+
+@router.get(
+    "/perfis/disponiveis"
+)
+def consultar_perfis_disponiveis():
+
+    uow = None
+
+    try:
+
+        uow = SqlServerUnitOfWork()
+        uow.open()
+
+        perfis = listar_perfis_disponiveis(
+            cursor=uow.cursor
+        )
+
+        return {
+            "total": len(perfis),
+            "perfis": perfis
+        }
+
+    finally:
+
+        if uow:
+            uow.close()
+
+
 @router.get(
     "/{id_usuario}"
 )
@@ -302,7 +335,8 @@ def consultar(
 )
 def atualizar(
     id_usuario: int,
-    dados: UsuarioAtualizacaoEntrada
+    dados: UsuarioAtualizacaoEntrada,
+    usuario_atual=Depends(obter_usuario_atual)
 ):
 
     if id_usuario <= 0:
@@ -310,6 +344,18 @@ def atualizar(
         raise HTTPException(
             status_code=400,
             detail="Usuário inválido."
+        )
+
+    if (
+        id_usuario == usuario_atual["id_usuario"]
+        and not dados.ativo
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nao e permitido desativar "
+                "o proprio usuario."
+            )
         )
 
     uow = None
@@ -588,8 +634,17 @@ def listar_perfis(
 )
 def vincular_perfil(
     id_usuario: int,
-    dados: UsuarioPerfilEntrada
+    dados: UsuarioPerfilEntrada,
+    usuario_atual=Depends(obter_usuario_atual)
 ):
+
+    if id_usuario == usuario_atual["id_usuario"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nao e permitido alterar os proprios perfis."
+            )
+        )
 
     if id_usuario <= 0:
 
@@ -690,8 +745,17 @@ def vincular_perfil(
 )
 def remover_perfil(
     id_usuario: int,
-    id_perfil: int
+    id_perfil: int,
+    usuario_atual=Depends(obter_usuario_atual)
 ):
+
+    if id_usuario == usuario_atual["id_usuario"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nao e permitido alterar os proprios perfis."
+            )
+        )
 
     if id_usuario <= 0:
 

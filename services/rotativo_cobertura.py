@@ -4,6 +4,8 @@ from services.rotativo_orquestrador import (
     executar_orquestracao_rotativo,
 )
 
+from infrastructure.database.unit_of_work import SqlServerUnitOfWork
+
 # ============================================================
 # UTILITÁRIOS
 # ============================================================
@@ -820,11 +822,90 @@ def _executar_inteligencia_pos_conclusao(
 # Deve ser chamado após SessoesContagem.Status = ENCERRADA.
 # ============================================================
 
+# ============================================================
+# PROCESSAR INTELIG?NCIA P?S-CONCLUS?O EM BACKGROUND
+#
+# Esta rotina:
+# - abre uma nova conex?o;
+# - n?o reutiliza a conex?o da requisi??o HTTP;
+# - executa somente ap?s a conclus?o operacional;
+# - n?o pode desfazer a contagem em caso de falha anal?tica.
+# ============================================================
+
+def processar_inteligencia_conclusao_rotativo_background(
+    id_sessao: int,
+    usuario: str | None = None
+):
+    uow = None
+
+    try:
+        uow = SqlServerUnitOfWork()
+        uow.open()
+
+        conn = uow.connection
+        cursor = uow.cursor
+
+        sessao = _buscar_sessao(
+            cursor=cursor,
+            id_sessao=id_sessao
+        )
+
+        if not sessao:
+            return
+
+        localizacao = (
+            _txt(
+                sessao.Localizacao
+            ).upper()
+        )
+
+        if not localizacao:
+            return
+
+        armazem = (
+            _resolver_armazem_sessao(
+                cursor=cursor,
+                id_inventario=sessao.ID_Inventario,
+                localizacao=localizacao,
+                armazem_inventario=sessao.cArmazem
+            )
+        )
+
+        executar_orquestracao_rotativo(
+            conn=conn,
+            cursor=cursor,
+            cliente_id=sessao.ClienteId,
+            armazem=armazem,
+            origem_evento="CONCLUSAO_LOCALIZACAO",
+            localizacao=localizacao,
+            id_inventario=sessao.ID_Inventario,
+            id_rodada=sessao.ID_Rodada,
+            usuario=(
+                _txt(usuario)
+                or None
+            ),
+            limite_score_sugestao=50.0,
+            quantidade_sugestoes=20,
+            retornar_painel=True,
+        )
+
+    except Exception as erro:
+        print(
+            "[ROTATIVO][BACKGROUND] "
+            f"Falha na inteligencia da sessao {id_sessao}: {erro}"
+        )
+
+    finally:
+        if uow:
+            uow.close()
+
+
 def registrar_conclusao_localizacao_rotativo(
     conn,
     cursor,
     id_sessao: int,
-    usuario: str | None = None
+    usuario: str | None = None,
+    processar_inteligencia: bool = True
 ):
     usuario = (
         _txt(usuario)
@@ -1118,23 +1199,37 @@ def registrar_conclusao_localizacao_rotativo(
     # Executado somente APÓS o commit operacional.
     # ========================================================
 
-    inteligencia = (
-        _executar_inteligencia_pos_conclusao(
-            conn=conn,
-            cursor=cursor,
-            cliente_id=sessao.ClienteId,
-            armazem=armazem,
-            localizacao=localizacao,
-            id_inventario=sessao.ID_Inventario,
-            id_rodada=sessao.ID_Rodada,
-            usuario=usuario,
-            ciclo_concluido=(
-                cobertura[
-                    "ciclo_concluido"
-                ]
-            ),
+    if processar_inteligencia:
+        inteligencia = (
+            _executar_inteligencia_pos_conclusao(
+                conn=conn,
+                cursor=cursor,
+                cliente_id=sessao.ClienteId,
+                armazem=armazem,
+                localizacao=localizacao,
+                id_inventario=sessao.ID_Inventario,
+                id_rodada=sessao.ID_Rodada,
+                usuario=usuario,
+                ciclo_concluido=(
+                    cobertura[
+                        "ciclo_concluido"
+                    ]
+                ),
+            )
         )
-    )
+
+    else:
+        inteligencia = {
+            "executada": False,
+            "motivo": "PROCESSAMENTO_POS_RESPOSTA",
+            "resultado": None,
+            "erro": None,
+            "mensagem": (
+                "A conclus?o operacional foi registrada. "
+                "A intelig?ncia rotativa ser? atualizada "
+                "ap?s a resposta ao operador."
+            ),
+        }
 
     return {
         "registrado": True,

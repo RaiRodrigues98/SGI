@@ -8,6 +8,9 @@ from services.rotativo_tendencia import (
 )
 from services.rotativo_contexto import (
     montar_contexto_localizacao_rotativo,
+    _buscar_ocorrencias_localizacao,
+    _montar_ocorrencias,
+    _agrupar_divergencias,
 )
 
 # ============================================================
@@ -737,13 +740,7 @@ def consultar_painel_rotativo(
             linha.UltimaContagem
         )
 
-        if ultima_contagem is None:
-
-            motivo = (
-                "Localização nunca contada"
-            )
-
-        elif (
+        if (
             _normalizar(
                 linha.TipoSugestao
             )
@@ -753,6 +750,12 @@ def consultar_painel_rotativo(
 
             motivo = (
                 "Localização priorizada por risco"
+            )
+
+        elif ultima_contagem is None:
+
+            motivo = (
+                "Localização nunca contada"
             )
 
         else:
@@ -1055,67 +1058,25 @@ def consultar_painel_rotativo(
         }
 
     # ========================================================
-    # CONTEXTOS INTEGRADOS DAS LOCALIZAÇÕES
+    # INDICADORES INTEGRADOS A PARTIR DAS TENDENCIAS
     #
-    # Fonte central para recorrência, tratativas e eficácia.
-    # ========================================================
-
-    cursor.execute(
-        """
-        SELECT
-            Localizacao
-
-        FROM dbo.CicloRotativoLocalizacoes
-
-        WHERE
-            ID_Ciclo = ?
-
-        ORDER BY
-            ISNULL(Prioridade, 999999),
-            Localizacao
-        """,
-        (
-            id_ciclo,
-        )
-    )
-
-    localizacoes_contexto_db = (
-        cursor.fetchall()
-    )
-
-    contextos = []
-
-    for linha in localizacoes_contexto_db:
-
-        contexto = (
-            montar_contexto_localizacao_rotativo(
-                cursor=cursor,
-                cliente_id=cliente_id,
-                armazem=armazem,
-                localizacao=linha.Localizacao,
-                limite_historico=10
-            )
-        )
-
-        contextos.append(
-            contexto
-        )
-
-    # ========================================================
-    # INDICADORES INTEGRADOS DE TRATATIVA
+    # A analise de tendencias ja montou o contexto completo
+    # de todas as localizacoes do ciclo. O painel reutiliza
+    # esses agregados e evita uma segunda varredura N+1.
     # ========================================================
 
     localizacoes_com_recorrencia = sum(
         1
-        for contexto in contextos
-        if (
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
-                "possui_recorrencia",
+        for item in lista_tendencias
+        if bool(
+            (
+                item.get(
+                    "recorrencia",
+                    {}
+                )
+                or {}
+            ).get(
+                "possui_recorrencia_item_lote",
                 False
             )
         )
@@ -1123,14 +1084,15 @@ def consultar_painel_rotativo(
 
     localizacoes_com_tratativa_pendente = sum(
         1
-        for contexto in contextos
-        if (
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
+        for item in lista_tendencias
+        if bool(
+            (
+                item.get(
+                    "tratativa",
+                    {}
+                )
+                or {}
+            ).get(
                 "necessita_tratativa",
                 False
             )
@@ -1139,176 +1101,198 @@ def consultar_painel_rotativo(
 
     ocorrencias_pendentes = sum(
         int(
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
+            (
+                item.get(
+                    "tratativa",
+                    {}
+                )
+                or {}
+            ).get(
                 "ocorrencias_pendentes",
                 0
             )
             or 0
         )
-        for contexto in contextos
+        for item in lista_tendencias
     )
 
     ocorrencias_resolvidas = sum(
         int(
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
+            (
+                item.get(
+                    "tratativa",
+                    {}
+                )
+                or {}
+            ).get(
                 "ocorrencias_resolvidas",
                 0
             )
             or 0
         )
-        for contexto in contextos
+        for item in lista_tendencias
     )
 
     grupos_recorrentes = sum(
         int(
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
+            (
+                item.get(
+                    "recorrencia",
+                    {}
+                )
+                or {}
+            ).get(
                 "grupos_recorrentes",
                 0
             )
             or 0
         )
-        for contexto in contextos
+        for item in lista_tendencias
     )
 
     grupos_pendentes = sum(
         int(
-            contexto
-            .get(
-                "divergencias",
-                {}
-            )
-            .get(
+            (
+                item.get(
+                    "tratativa",
+                    {}
+                )
+                or {}
+            ).get(
                 "grupos_pendentes",
                 0
             )
             or 0
         )
-        for contexto in contextos
+        for item in lista_tendencias
     )
 
     # ========================================================
-    # INDICADORES DE EFICÁCIA
+    # INDICADORES DE EFICACIA
     # ========================================================
 
-    eficazes = 0
-    nao_eficazes = 0
-    sem_evidencia = 0
-    resolucoes_avaliadas = 0
-
-    for contexto in contextos:
-
-        resolucoes = (
-            contexto
-            .get(
-                "eficacia",
-                {}
-            )
-            .get(
-                "resolucoes",
-                []
-            )
-            or []
-        )
-
-        for resolucao in resolucoes:
-
-            resolucoes_avaliadas += 1
-
-            eficacia_item = (
-                resolucao
-                .get(
+    resolucoes_avaliadas = sum(
+        int(
+            (
+                item.get(
                     "eficacia",
                     {}
                 )
                 or {}
+            ).get(
+                "resolucoes_avaliadas",
+                0
             )
+            or 0
+        )
+        for item in lista_tendencias
+    )
 
-            classificacao_eficacia = (
-                eficacia_item.get(
-                    "classificacao"
+    eficazes = sum(
+        int(
+            (
+                item.get(
+                    "eficacia",
+                    {}
                 )
+                or {}
+            ).get(
+                "eficazes",
+                0
             )
+            or 0
+        )
+        for item in lista_tendencias
+    )
 
-            if classificacao_eficacia == "EFICAZ":
-                eficazes += 1
+    nao_eficazes = sum(
+        int(
+            (
+                item.get(
+                    "eficacia",
+                    {}
+                )
+                or {}
+            ).get(
+                "nao_eficazes",
+                0
+            )
+            or 0
+        )
+        for item in lista_tendencias
+    )
 
-            elif classificacao_eficacia == "NAO_EFICAZ":
-                nao_eficazes += 1
-
-            elif classificacao_eficacia == "AINDA_SEM_EVIDENCIA":
-                sem_evidencia += 1
+    sem_evidencia = sum(
+        int(
+            (
+                item.get(
+                    "eficacia",
+                    {}
+                )
+                or {}
+            ).get(
+                "ainda_sem_evidencia",
+                0
+            )
+            or 0
+        )
+        for item in lista_tendencias
+    )
 
     # ========================================================
     # ALERTA DE TRATATIVA
     #
-    # Prioridade:
-    # 1. Localização com recorrência
-    # 2. Maior quantidade de ocorrências pendentes
-    # 3. Maior score de risco
+    # Mantem a mesma prioridade:
+    # 1. recorrencia
+    # 2. maior quantidade de ocorrencias pendentes
+    # 3. maior score de risco
+    # 4. localizacao
     # ========================================================
 
     alerta_tratativa = None
 
-    candidatos_tratativa = []
-
-    for contexto in contextos:
-
-        divergencias_contexto = (
-            contexto.get(
-                "divergencias",
-                {}
-            )
-            or {}
-        )
-
-        if not divergencias_contexto.get(
-            "necessita_tratativa",
-            False
-        ):
-            continue
-
-        candidatos_tratativa.append(
-            contexto
-        )
-
-    candidatos_tratativa.sort(
-        key=lambda contexto: (
-            0
-            if (
-                contexto
-                .get(
-                    "divergencias",
+    candidatos_tratativa = [
+        item
+        for item in lista_tendencias
+        if bool(
+            (
+                item.get(
+                    "tratativa",
                     {}
                 )
-                .get(
-                    "possui_recorrencia",
+                or {}
+            ).get(
+                "necessita_tratativa",
+                False
+            )
+        )
+    ]
+
+    candidatos_tratativa.sort(
+        key=lambda item: (
+            0
+            if bool(
+                (
+                    item.get(
+                        "recorrencia",
+                        {}
+                    )
+                    or {}
+                ).get(
+                    "possui_recorrencia_item_lote",
                     False
                 )
             )
             else 1,
 
             -int(
-                contexto
-                .get(
-                    "divergencias",
-                    {}
-                )
-                .get(
+                (
+                    item.get(
+                        "tratativa",
+                        {}
+                    )
+                    or {}
+                ).get(
                     "ocorrencias_pendentes",
                     0
                 )
@@ -1316,22 +1300,17 @@ def consultar_painel_rotativo(
             ),
 
             -float(
-                contexto
-                .get(
-                    "risco",
-                    {}
-                )
-                .get(
-                    "score",
+                item.get(
+                    "score_risco",
                     0
                 )
                 or 0
             ),
 
-            contexto.get(
+            item.get(
                 "localizacao",
                 ""
-            )
+            ),
         )
     )
 
@@ -1341,20 +1320,56 @@ def consultar_painel_rotativo(
             candidatos_tratativa[0]
         )
 
-        divergencias_principal = (
+        localizacao_principal = (
             principal_tratativa.get(
-                "divergencias",
+                "localizacao"
+            )
+        )
+
+        tratativa_principal = (
+            principal_tratativa.get(
+                "tratativa",
                 {}
             )
             or {}
         )
 
-        grupos_principal = (
-            divergencias_principal.get(
-                "grupos",
-                []
+        recorrencia_principal = (
+            principal_tratativa.get(
+                "recorrencia",
+                {}
             )
-            or []
+            or {}
+        )
+
+        # ----------------------------------------------------
+        # Preservar grupo_principal sem remontar o contexto.
+        #
+        # Somente a localizacao escolhida como alerta precisa
+        # ter suas ocorrencias carregadas para montar o grupo.
+        # ----------------------------------------------------
+
+        ocorrencias_principal_db = (
+            _buscar_ocorrencias_localizacao(
+                cursor=cursor,
+                cliente_id=cliente_id,
+                armazem=armazem,
+                localizacao=(
+                    localizacao_principal
+                ),
+            )
+        )
+
+        ocorrencias_principal = (
+            _montar_ocorrencias(
+                ocorrencias_principal_db
+            )
+        )
+
+        grupos_principal = (
+            _agrupar_divergencias(
+                ocorrencias_principal
+            )
         )
 
         grupo_principal = (
@@ -1365,56 +1380,51 @@ def consultar_painel_rotativo(
 
         alerta_tratativa = {
             "localizacao":
-                principal_tratativa.get(
-                    "localizacao"
-                ),
+                localizacao_principal,
 
             "score_risco":
-                (
-                    principal_tratativa
-                    .get(
-                        "risco",
-                        {}
-                    )
-                    .get(
-                        "score"
-                    )
+                principal_tratativa.get(
+                    "score_risco"
                 ),
 
             "classificacao_risco":
-                (
-                    principal_tratativa
-                    .get(
-                        "risco",
-                        {}
-                    )
-                    .get(
-                        "classificacao"
-                    )
+                principal_tratativa.get(
+                    "classificacao_risco"
                 ),
 
             "possui_recorrencia":
-                divergencias_principal.get(
-                    "possui_recorrencia",
-                    False
+                bool(
+                    recorrencia_principal.get(
+                        "possui_recorrencia_item_lote",
+                        False
+                    )
                 ),
 
             "ocorrencias_pendentes":
-                divergencias_principal.get(
-                    "ocorrencias_pendentes",
-                    0
+                int(
+                    tratativa_principal.get(
+                        "ocorrencias_pendentes",
+                        0
+                    )
+                    or 0
                 ),
 
             "ocorrencias_resolvidas":
-                divergencias_principal.get(
-                    "ocorrencias_resolvidas",
-                    0
+                int(
+                    tratativa_principal.get(
+                        "ocorrencias_resolvidas",
+                        0
+                    )
+                    or 0
                 ),
 
             "grupos_pendentes":
-                divergencias_principal.get(
-                    "grupos_pendentes",
-                    0
+                int(
+                    tratativa_principal.get(
+                        "grupos_pendentes",
+                        0
+                    )
+                    or 0
                 ),
 
             "necessita_tratativa":

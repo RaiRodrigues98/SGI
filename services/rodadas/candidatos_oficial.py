@@ -25,6 +25,157 @@ from services.analise_recontagem import (
 )
 
 
+def _buscar_candidatos_r2_oficial(
+    cursor,
+    id_inventario: int,
+    id_rodada_origem: int
+):
+    """
+    Seleciona as divergências da primeira rodada oficial
+    quando a configuração possui somente uma rodada inicial.
+
+    A conciliação é feita por Código + Lote.
+    Localização participa apenas da rastreabilidade.
+    """
+
+    cursor.execute(
+        """
+        ;WITH Estoque AS (
+            SELECT
+                LTRIM(RTRIM(Codigo)) AS Codigo,
+                LTRIM(
+                    RTRIM(
+                        ISNULL(Lote, '')
+                    )
+                ) AS Lote,
+                SUM(SaldoInventario) AS QtdEstoque
+
+            FROM dbo.InventarioEstoqueSnapshot
+
+            WHERE ID_Inventario = ?
+
+            GROUP BY
+                LTRIM(RTRIM(Codigo)),
+                LTRIM(
+                    RTRIM(
+                        ISNULL(Lote, '')
+                    )
+                )
+        ),
+        Contado AS (
+            SELECT
+                LTRIM(RTRIM(C.Codigo)) AS Codigo,
+                LTRIM(
+                    RTRIM(
+                        ISNULL(C.Lote, '')
+                    )
+                ) AS Lote,
+                SUM(C.Quantidade) AS QtdContada
+
+            FROM dbo.Contagens C
+
+            INNER JOIN dbo.SessoesContagem S
+                ON S.ID_Sessao = C.ID_Sessao
+
+            WHERE
+                S.ID_Inventario = ?
+                AND S.ID_Rodada = ?
+                AND S.ValidaParaConsolidacao = 1
+                AND C.Status = 'ATIVA'
+
+            GROUP BY
+                LTRIM(RTRIM(C.Codigo)),
+                LTRIM(
+                    RTRIM(
+                        ISNULL(C.Lote, '')
+                    )
+                )
+        )
+        SELECT
+            COALESCE(
+                E.Codigo,
+                C.Codigo
+            ) AS Codigo,
+
+            COALESCE(
+                E.Lote,
+                C.Lote,
+                ''
+            ) AS Lote,
+
+            ISNULL(
+                E.QtdEstoque,
+                0
+            ) AS QtdEstoque,
+
+            ISNULL(
+                C.QtdContada,
+                0
+            ) AS QtdContada
+
+        FROM Estoque E
+
+        FULL OUTER JOIN Contado C
+            ON C.Codigo = E.Codigo
+           AND C.Lote = E.Lote
+
+        WHERE
+            ISNULL(E.QtdEstoque, 0)
+            <>
+            ISNULL(C.QtdContada, 0)
+
+        ORDER BY
+            Codigo,
+            Lote
+        """,
+        (
+            id_inventario,
+            id_inventario,
+            id_rodada_origem,
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    candidatos = []
+
+    for linha in linhas:
+        qtd_estoque = float(
+            linha.QtdEstoque or 0
+        )
+
+        qtd_contada = float(
+            linha.QtdContada or 0
+        )
+
+        if (
+            qtd_estoque > 0
+            and
+            qtd_contada == 0
+        ):
+            motivo = "FALTA_R1"
+
+        elif (
+            qtd_estoque == 0
+            and
+            qtd_contada > 0
+        ):
+            motivo = "SOBRA_R1"
+
+        else:
+            motivo = "DIVERGENCIA_R1"
+
+        candidatos.append(
+            {
+                "codigo": linha.Codigo,
+                "lote": linha.Lote,
+                "motivo": motivo,
+            }
+        )
+
+    return candidatos
+
+
 def _buscar_candidatos_r3(
     cursor,
     id_inventario: int

@@ -44,8 +44,9 @@ from routers.rotativo_consulta import (
 from routers.rotativo_priorizacao import router as rotativo_priorizacao
 from routers.auditoria import router as auditoria_router
 from routers.planos_acao import router as planos_acao_router
+from routers.notificacoes import router as notificacoes_router
 # ============================================================
-# APLICAÇÃO
+# APLICAÃ‡ÃƒO
 # ============================================================
 
 app = FastAPI(
@@ -63,6 +64,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8080",
         "http://127.0.0.1:8080",
+        "http://192.168.10.239:8080",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -73,6 +77,10 @@ app.add_middleware(
 # ============================================================
 # ROUTERS
 # ============================================================
+
+app.include_router(
+    inventarios_router
+)
 
 app.include_router(
     contagens_router
@@ -127,10 +135,6 @@ app.include_router(
 )
 
 app.include_router(
-    inventarios_router
-)
-
-app.include_router(
     rotativo_router
 )
 
@@ -161,4 +165,12 @@ app.include_router(rotativo_priorizacao)
 app.include_router(
     auditoria_router
 )
-app.include_router(planos_acao_router)
+app.include_router(
+    planos_acao_router,
+    include_in_schema=False,
+)
+
+app.include_router(
+    notificacoes_router
+)
+

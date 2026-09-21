@@ -36,6 +36,11 @@ from services.rotativo_contexto import (
 from services.rotativo_orquestrador import (
     executar_orquestracao_rotativo,
 )
+from services.rotativo_universo import (
+    consultar_universo_rotativo,
+    configurar_universo_rotativo,
+)
+
 router = APIRouter(
     prefix="/rotativo",
     tags=["Controle Rotativo"]
@@ -45,6 +50,20 @@ router = APIRouter(
 # ============================================================
 # PAYLOAD
 # ============================================================
+
+class ConfigurarUniversoRotativoRequest(
+    BaseModel
+):
+    cliente_id: int = Field(
+        ...,
+        ge=1
+    )
+
+    armazem: str = Field(
+        ...,
+        min_length=1
+    )
+
 
 class AbrirCicloRotativoRequest(
     BaseModel
@@ -81,6 +100,121 @@ class ResolverOcorrenciaRequest(
     id_inventario_resolucao: int | None = None
 
     id_rodada_resolucao: int | None = None
+# ============================================================
+# UNIVERSO ROTATIVO - STATUS
+# ============================================================
+
+@router.get(
+    "/universo/status"
+)
+def obter_status_universo_rotativo(
+    cliente_id: int = Query(
+        ...,
+        ge=1
+    ),
+    armazem: str = Query(
+        ...,
+        min_length=1
+    )
+):
+    uow = None
+
+    try:
+        uow = SqlServerUnitOfWork()
+        uow.open()
+
+        return consultar_universo_rotativo(
+            cursor=uow.cursor,
+            cliente_id=cliente_id,
+            armazem=armazem,
+        )
+
+    except BusinessRuleViolation as erro:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(erro)
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
+
+        if uow:
+            uow.close()
+
+
+# ============================================================
+# UNIVERSO ROTATIVO - CONFIGURAR
+# ============================================================
+
+@router.post(
+    "/universo/configurar"
+)
+def configurar_universo_rotativo_endpoint(
+    dados: ConfigurarUniversoRotativoRequest
+):
+    uow = None
+    conn = None
+
+    try:
+        uow = SqlServerUnitOfWork()
+        uow.open()
+        conn = uow.connection
+
+        resultado = (
+            configurar_universo_rotativo(
+                cursor=uow.cursor,
+                cliente_id=dados.cliente_id,
+                armazem=dados.armazem,
+            )
+        )
+
+        uow.commit()
+
+        return resultado
+
+    except BusinessRuleViolation as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(erro)
+        )
+
+    except HTTPException:
+
+        if conn:
+            uow.rollback()
+
+        raise
+
+    except Exception as erro:
+
+        if conn:
+            uow.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
+
+        if uow:
+            uow.close()
+
+
 # ============================================================
 # ABRIR CICLO
 # ============================================================

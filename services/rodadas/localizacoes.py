@@ -204,6 +204,124 @@ def _inserir_rodada_localizacao(
         localizacao=localizacao
     )
 
+def rodada_operacional_concluida(
+    cursor,
+    id_rodada: int
+) -> bool:
+
+    # SGI: conclusao R1 pelo escopo e sessoes
+    cursor.execute(
+        """
+        SELECT ID_Inventario, NumeroRodada
+        FROM dbo.RodadasInventario
+        WHERE ID_Rodada = ?
+        """,
+        (id_rodada,)
+    )
+
+    contexto = cursor.fetchone()
+
+    if contexto is None:
+        return False
+
+    if int(contexto.NumeroRodada) == 1:
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS TotalLocalizacoes,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN U.ID_Sessao IS NOT NULL
+                             AND U.ValidaParaConsolidacao = 1
+                             AND U.Status IS NOT NULL
+                             AND UPPER(LTRIM(RTRIM(U.Status)))
+                                 NOT IN (
+                                     'ABERTA',
+                                     'CANCELADA',
+                                     'INVALIDADA',
+                                     'PENDENTE',
+                                     'EM_CONTAGEM'
+                                 )
+                            THEN 0
+                            ELSE 1
+                        END
+                    ),
+                    0
+                ) AS LocalizacoesPendentes
+            FROM dbo.InventarioEscopoLocalizacoes E
+            OUTER APPLY (
+                SELECT TOP 1
+                    S.ID_Sessao,
+                    S.Status,
+                    S.ValidaParaConsolidacao
+                FROM dbo.SessoesContagem S
+                WHERE S.ID_Inventario = E.ID_Inventario
+                  AND S.ID_Rodada = ?
+                  AND S.Localizacao = E.Localizacao
+                ORDER BY S.ID_Sessao DESC
+            ) U
+            WHERE E.ID_Inventario = ?
+              AND E.Selecionado = 1
+            """,
+            (
+                id_rodada,
+                contexto.ID_Inventario,
+            )
+        )
+
+        resumo = cursor.fetchone()
+
+        return bool(
+            resumo
+            and int(resumo[0] or 0) > 0
+            and int(resumo[1] or 0) == 0
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            COUNT(*) AS TotalLocalizacoes,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN Status = 'CONCLUIDA'
+                            THEN 0
+                        ELSE 1
+                    END
+                ),
+                0
+            ) AS LocalizacoesPendentes
+
+        FROM dbo.RodadaLocalizacoes
+
+        WHERE ID_Rodada = ?
+        """,
+        (
+            id_rodada,
+        )
+    )
+
+    linha = cursor.fetchone()
+
+    if not linha:
+        return False
+
+    total_localizacoes = int(
+        linha[0] or 0
+    )
+
+    localizacoes_pendentes = int(
+        linha[1] or 0
+    )
+
+    return (
+        total_localizacoes > 0
+        and
+        localizacoes_pendentes == 0
+    )
+
+
 def sincronizar_localizacoes_recontagem(
     cursor,
     id_inventario: int,

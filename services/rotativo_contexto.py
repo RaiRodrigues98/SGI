@@ -936,7 +936,8 @@ def _agrupar_divergencias(
 def _avaliar_eficacia(
     cursor,
     ocorrencia,
-    id_rotativo_localizacao: int
+    id_rotativo_localizacao: int,
+    evidencia_precarregada=None
 ):
 
     if not ocorrencia[
@@ -964,6 +965,93 @@ def _avaliar_eficacia(
     # --------------------------------------------------------
     # NOVA OCORRÊNCIA DA MESMA CHAVE
     # --------------------------------------------------------
+
+    if evidencia_precarregada is not None:
+
+        nova_ocorrencia_id = getattr(
+            evidencia_precarregada,
+            "NovaOcorrenciaID",
+            None
+        )
+
+        if nova_ocorrencia_id is not None:
+
+            return {
+                "classificacao":
+                    "NAO_EFICAZ",
+
+                "motivo":
+                    (
+                        "A mesma combina\u00e7\u00e3o Localiza\u00e7\u00e3o + C\u00f3digo + Lote "
+                        "voltou a apresentar diverg\u00eancia ap\u00f3s a resolu\u00e7\u00e3o."
+                    ),
+
+                "nova_ocorrencia":
+                    nova_ocorrencia_id,
+
+                "data_nova_ocorrencia":
+                    getattr(
+                        evidencia_precarregada,
+                        "DataNovaOcorrencia",
+                        None
+                    ),
+            }
+
+        id_historico_validacao = getattr(
+            evidencia_precarregada,
+            "IDHistoricoValidacao",
+            None
+        )
+
+        if id_historico_validacao is None:
+
+            return {
+                "classificacao":
+                    "AINDA_SEM_EVIDENCIA",
+
+                "motivo":
+                    "Ainda n\u00e3o existe nova contagem ap\u00f3s a resolu\u00e7\u00e3o.",
+            }
+
+        possui_divergencia_posterior = bool(
+            getattr(
+                evidencia_precarregada,
+                "PossuiDivergenciaPosterior",
+                False
+            )
+        )
+
+        if not possui_divergencia_posterior:
+
+            return {
+                "classificacao":
+                    "EFICAZ",
+
+                "motivo":
+                    "Houve nova contagem da localiza\u00e7\u00e3o sem diverg\u00eancia.",
+
+                "id_historico_validacao":
+                    id_historico_validacao,
+
+                "data_validacao":
+                    getattr(
+                        evidencia_precarregada,
+                        "DataHistoricoValidacao",
+                        None
+                    ),
+            }
+
+        return {
+            "classificacao":
+                "AINDA_SEM_EVIDENCIA",
+
+            "motivo":
+                (
+                    "Houve nova contagem da localiza\u00e7\u00e3o, mas existem "
+                    "outras diverg\u00eancias. Ainda n\u00e3o h\u00e1 evid\u00eancia suficiente "
+                    "para afirmar efic\u00e1cia para este item."
+                ),
+        }
 
     cursor.execute(
         """
@@ -1141,7 +1229,8 @@ def montar_contexto_localizacao_rotativo(
     cliente_id: int,
     armazem: str,
     localizacao: str,
-    limite_historico: int = 10
+    limite_historico: int = 10,
+    dados_precarregados=None
 ):
 
     armazem = _normalizar(
@@ -1184,14 +1273,24 @@ def montar_contexto_localizacao_rotativo(
     # CADASTRO ROTATIVO
     # ========================================================
 
-    cadastro = (
-        _buscar_localizacao_rotativo(
-            cursor=cursor,
-            cliente_id=cliente_id,
-            armazem=armazem,
-            localizacao=localizacao,
+    if (
+        dados_precarregados is not None
+        and "cadastro" in dados_precarregados
+    ):
+        cadastro = (
+            dados_precarregados[
+                "cadastro"
+            ]
         )
-    )
+    else:
+        cadastro = (
+            _buscar_localizacao_rotativo(
+                cursor=cursor,
+                cliente_id=cliente_id,
+                armazem=armazem,
+                localizacao=localizacao,
+            )
+        )
 
     if not cadastro:
 
@@ -1208,43 +1307,75 @@ def montar_contexto_localizacao_rotativo(
     # CICLO ATUAL
     # ========================================================
 
-    ciclo = (
-        _buscar_ciclo_aberto(
-            cursor=cursor,
-            cliente_id=cliente_id,
-            armazem=armazem,
+    if (
+        dados_precarregados is not None
+        and "ciclo" in dados_precarregados
+    ):
+        ciclo = (
+            dados_precarregados[
+                "ciclo"
+            ]
         )
-    )
+    else:
+        ciclo = (
+            _buscar_ciclo_aberto(
+                cursor=cursor,
+                cliente_id=cliente_id,
+                armazem=armazem,
+            )
+        )
 
     ciclo_localizacao = None
 
     if ciclo:
 
-        ciclo_localizacao = (
-            _buscar_localizacao_ciclo(
+        if (
+            dados_precarregados is not None
+            and "ciclo_localizacao"
+            in dados_precarregados
+        ):
+            ciclo_localizacao = (
+                dados_precarregados[
+                    "ciclo_localizacao"
+                ]
+            )
+        else:
+            ciclo_localizacao = (
+                _buscar_localizacao_ciclo(
+                    cursor=cursor,
+                    id_ciclo=ciclo.ID_Ciclo,
+                    id_rotativo_localizacao=(
+                        id_rotativo_localizacao
+                    ),
+                )
+            )
+
+    # ========================================================
+    # HISTORICO
+    # ========================================================
+
+    if (
+        dados_precarregados is not None
+        and "historico_db"
+        in dados_precarregados
+    ):
+        historico_db = (
+            dados_precarregados[
+                "historico_db"
+            ]
+        )
+    else:
+        historico_db = (
+            _buscar_historico_localizacao(
                 cursor=cursor,
-                id_ciclo=ciclo.ID_Ciclo,
                 id_rotativo_localizacao=(
                     id_rotativo_localizacao
                 ),
+                limite_historico=(
+                    limite_historico
+                ),
             )
         )
-
-    # ========================================================
-    # HISTÓRICO
-    # ========================================================
-
-    historico_db = (
-        _buscar_historico_localizacao(
-            cursor=cursor,
-            id_rotativo_localizacao=(
-                id_rotativo_localizacao
-            ),
-            limite_historico=(
-                limite_historico
-            ),
-        )
-    )
 
     resumo_historico = (
         _resumir_historico(
@@ -1315,14 +1446,25 @@ def montar_contexto_localizacao_rotativo(
     # OCORRÊNCIAS
     # ========================================================
 
-    ocorrencias_db = (
-        _buscar_ocorrencias_localizacao(
-            cursor=cursor,
-            cliente_id=cliente_id,
-            armazem=armazem,
-            localizacao=localizacao,
+    if (
+        dados_precarregados is not None
+        and "ocorrencias_db"
+        in dados_precarregados
+    ):
+        ocorrencias_db = (
+            dados_precarregados[
+                "ocorrencias_db"
+            ]
         )
-    )
+    else:
+        ocorrencias_db = (
+            _buscar_ocorrencias_localizacao(
+                cursor=cursor,
+                cliente_id=cliente_id,
+                armazem=armazem,
+                localizacao=localizacao,
+            )
+        )
 
     ocorrencias = (
         _montar_ocorrencias(
@@ -1360,12 +1502,37 @@ def montar_contexto_localizacao_rotativo(
         ]:
             continue
 
+        evidencia_precarregada = None
+
+        if dados_precarregados is not None:
+
+            eficacia_por_ocorrencia = (
+                dados_precarregados.get(
+                    "eficacia_por_ocorrencia"
+                )
+            )
+
+            if eficacia_por_ocorrencia is not None:
+
+                evidencia_precarregada = (
+                    eficacia_por_ocorrencia.get(
+                        int(
+                            ocorrencia[
+                                "id_ocorrencia"
+                            ]
+                        )
+                    )
+                )
+
         eficacia = (
             _avaliar_eficacia(
                 cursor=cursor,
                 ocorrencia=ocorrencia,
                 id_rotativo_localizacao=(
                     id_rotativo_localizacao
+                ),
+                evidencia_precarregada=(
+                    evidencia_precarregada
                 ),
             )
         )

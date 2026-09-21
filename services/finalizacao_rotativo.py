@@ -1809,9 +1809,191 @@ def finalizar_inventario_rotativo(
         )
 
     if not r2:
-                raise BusinessRuleViolation(
-            "A R2 do inventário ROTATIVO ainda não foi criada."
+
+        # ====================================================
+        # ROTATIVO SEM R2
+        #
+        # R2 somente e obrigatoria quando existe
+        # necessidade real de recontagem.
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.SessoesContagem
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+                AND Status = 'ABERTA'
+            """,
+            (
+                id_inventario,
+                r1.ID_Rodada
+            )
         )
+
+        sessoes_abertas_r1 = int(
+            cursor.fetchone()[0]
+        )
+
+        if sessoes_abertas_r1 > 0:
+
+            raise BusinessRuleViolation(
+                "Existem sess\u00f5es abertas na R1. "
+                "Encerre todas antes de finalizar "
+                "o invent\u00e1rio ROTATIVO."
+            )
+
+        # ====================================================
+        # RECONTAR ATIVO EXIGE R2
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.DecisoesRotativo
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+                AND Decisao = 'RECONTAR'
+                AND Status = 'ATIVA'
+            """,
+            (
+                id_inventario,
+                r1.ID_Rodada
+            )
+        )
+
+        total_recontar = int(
+            cursor.fetchone()[0]
+        )
+
+        if total_recontar > 0:
+
+            raise BusinessRuleViolation(
+                "Existem decis\u00f5es RECONTAR ativas. "
+                "O invent\u00e1rio deve seguir para R2."
+            )
+
+        # ====================================================
+        # DIVERGENCIAS PENDENTES BLOQUEIAM FINALIZACAO
+        # ====================================================
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.OcorrenciasDivergencia
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+                AND StatusResolucao IN (
+                    'PENDENTE',
+                    'EM_RECONTAGEM'
+                )
+            """,
+            (
+                id_inventario,
+                r1.ID_Rodada
+            )
+        )
+
+        divergencias_pendentes = int(
+            cursor.fetchone()[0]
+        )
+
+        if divergencias_pendentes > 0:
+
+            raise BusinessRuleViolation(
+                "Ainda existem diverg\u00eancias da R1 "
+                "sem tratamento conclu\u00eddo."
+            )
+
+        # ====================================================
+        # CONSOLIDA RESULTADO FINAL PELA R1
+        # ====================================================
+
+        resultado_final = (
+            consolidar_resultado_final_rotativo_r1(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                id_rodada_r1=r1.ID_Rodada,
+                usuario=usuario
+            )
+        )
+
+        # ====================================================
+        # FINALIZA R1
+        # ====================================================
+
+        cursor.execute(
+            """
+            UPDATE dbo.RodadasInventario
+            SET
+                Status = 'FINALIZADA',
+                DataHoraFim = COALESCE(
+                    DataHoraFim,
+                    SYSDATETIME()
+                )
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+                AND Status = 'ABERTA'
+            """,
+            (
+                id_inventario,
+                r1.ID_Rodada
+            )
+        )
+
+        # ====================================================
+        # FINALIZA INVENTARIO
+        # ====================================================
+
+        cursor.execute(
+            """
+            UPDATE dbo.Inventarios
+            SET
+                Status = 'FINALIZADO',
+                RodadaAtual = 1,
+                DataHoraFim = COALESCE(
+                    DataHoraFim,
+                    SYSDATETIME()
+                ),
+                FinalizadoPor = ?
+            WHERE
+                ID_Inventario = ?
+                AND ISNULL(Status, '') <> 'FINALIZADO'
+            """,
+            (
+                usuario,
+                id_inventario
+            )
+        )
+
+        if cursor.rowcount == 0:
+
+            raise BusinessRuleViolation(
+                "N\u00e3o foi poss\u00edvel finalizar "
+                "o invent\u00e1rio ROTATIVO pela R1."
+            )
+
+        return {
+            "sucesso": True,
+            "id_inventario": id_inventario,
+            "codigo_inventario": (
+                inventario.CodigoInventario
+            ),
+            "tipo_inventario": "ROTATIVO",
+            "status": "FINALIZADO",
+            "finalizado_por": usuario,
+            "rodada_final": 1,
+            "resultado_final": resultado_final,
+            "mensagem": (
+                "Resultado final consolidado pela R1 "
+                "e invent\u00e1rio ROTATIVO finalizado "
+                "sem necessidade de R2."
+            )
+        }
 
     cursor.execute(
         """

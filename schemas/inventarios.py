@@ -36,3 +36,11 @@ class InventarioCriacaoEntrada(BaseModel):
         min_length=1,
         max_length=60
     )
+
+
+class InventarioCancelamentoEntrada(BaseModel):
+
+    motivo: str = Field(
+        ...,
+        min_length=1
+    )

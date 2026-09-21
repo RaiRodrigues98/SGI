@@ -15,6 +15,11 @@ from schemas.gestor import (
 )
 
 
+from services.notificacoes import (
+    criar_por_permissao,
+)
+
+
 router = APIRouter(
     tags=["Gestor"]
 )
@@ -458,6 +463,88 @@ def registrar_decisao_gestor(
 
         nova = cursor.fetchone()
 
+        if decisao == "NOVA_RECONTAGEM":
+            tipo_notificacao = (
+                "RECONTAGEM_SOLICITADA"
+            )
+            titulo_notificacao = (
+                "Nova recontagem solicitada"
+            )
+            mensagem_notificacao = (
+                f"O gestor solicitou nova "
+                f"recontagem para o item "
+                f"{codigo}"
+                + (
+                    f", lote {lote}"
+                    if lote
+                    else ""
+                )
+                + (
+                    f", no invent\u00e1rio "
+                    f"{inventario.CodigoInventario}."
+                )
+            )
+            prioridade_notificacao = "CRITICA"
+            permissao_destino = "RODADA_GERAR"
+        else:
+            tipo_notificacao = (
+                "GESTOR_DECISAO_REGISTRADA"
+            )
+            titulo_notificacao = (
+                "Decis\u00e3o do gestor registrada"
+            )
+            mensagem_notificacao = (
+                f"O item {codigo}"
+                + (
+                    f", lote {lote}"
+                    if lote
+                    else ""
+                )
+                + (
+                    f", recebeu a decis\u00e3o "
+                    f"{decisao.replace('_', ' ').title()} "
+                    f"no invent\u00e1rio "
+                    f"{inventario.CodigoInventario}."
+                )
+            )
+            prioridade_notificacao = "ALTA"
+            permissao_destino = (
+                "INVENTARIO_FINALIZAR"
+            )
+
+        resumo_notificacoes = (
+            criar_por_permissao(
+                cursor=cursor,
+                codigo_permissao=(
+                    permissao_destino
+                ),
+                id_usuario_ator=int(
+                    usuario_atual["id_usuario"]
+                ),
+                tipo=tipo_notificacao,
+                titulo=titulo_notificacao,
+                mensagem=mensagem_notificacao,
+                prioridade=(
+                    prioridade_notificacao
+                ),
+                entidade_tipo="DECISAO_GESTOR",
+                entidade_id=int(
+                    nova.ID_Decisao
+                ),
+                id_inventario=id_inventario,
+                url=(
+                    f"/inventarios/"
+                    f"{id_inventario}"
+                ),
+                chave_dedupe=(
+                    f"{tipo_notificacao}:"
+                    f"{id_inventario}:"
+                    f"{nova.ID_Decisao}"
+                ),
+                excluir_ator=False,
+            )
+        )
+
         uow.commit()
 
         return {
@@ -496,6 +583,9 @@ def registrar_decisao_gestor(
 
             "status":
                 "ATIVA",
+
+            "notificacoes":
+                resumo_notificacoes,
 
             "mensagem":
                 "Decisão gerencial registrada com sucesso."

@@ -1,6 +1,10 @@
 from domain.exceptions import BusinessRuleViolation
 from datetime import datetime
 
+from services.rotativo_universo import (
+    consultar_universo_rotativo,
+)
+
 
 # ============================================================
 # UTILITÁRIOS
@@ -146,7 +150,8 @@ def _buscar_localizacoes_elegiveis(
             ScoreRisco,
             ClassificacaoRisco,
             Sugerida,
-            Prioridade
+            Prioridade,
+            TipoSugestao
 
         FROM dbo.RotativoLocalizacoes
 
@@ -251,6 +256,37 @@ def abrir_ciclo_rotativo(
         }
 
     # --------------------------------------------------------
+    # Valida universo rotativo antes de congelar o ciclo
+    # --------------------------------------------------------
+
+    universo = consultar_universo_rotativo(
+        cursor=cursor,
+        cliente_id=cliente_id,
+        armazem=armazem,
+    )
+
+    if not universo["configurado"]:
+        raise BusinessRuleViolation(
+            "UNIVERSO_ROTATIVO_NAO_CONFIGURADO: "
+            "O universo rotativo ainda não foi configurado "
+            "para este cliente/armazém. "
+            "Configure o universo antes de abrir o ciclo."
+        )
+
+    if not universo["sincronizado"]:
+        total_novas = universo[
+            "total_novas_localizacoes"
+        ]
+
+        raise BusinessRuleViolation(
+            "UNIVERSO_ROTATIVO_DESATUALIZADO: "
+            f"O universo rotativo possui {total_novas} "
+            "nova(s) localização(ões) do estoque "
+            "que ainda não fazem parte do cadastro mestre. "
+            "Sincronize o universo antes de abrir o ciclo."
+        )
+
+    # --------------------------------------------------------
     # Busca universo operacional do rotativo
     # --------------------------------------------------------
 
@@ -326,15 +362,7 @@ def abrir_ciclo_rotativo(
     # Snapshot das localizações pertencentes ao ciclo
     # ----------------------------------------------------
 
-    for posicao, linha in enumerate(
-        localizacoes,
-        start=1
-    ):
-        prioridade = (
-            linha.Prioridade
-            if linha.Prioridade is not None
-            else posicao
-        )
+    for linha in localizacoes:
 
         cursor.execute(
             """
@@ -350,6 +378,7 @@ def abrir_ciclo_rotativo(
                 ClassificacaoRiscoEntrada,
                 Sugerida,
                 Prioridade,
+                TipoSugestao,
                 DataHoraAtualizacao
             )
             VALUES (
@@ -360,6 +389,7 @@ def abrir_ciclo_rotativo(
                 ?,
                 'PENDENTE',
                 SYSDATETIME(),
+                ?,
                 ?,
                 ?,
                 ?,
@@ -382,7 +412,8 @@ def abrir_ciclo_rotativo(
                 bool(
                     linha.Sugerida
                 ),
-                prioridade
+                linha.Prioridade,
+                linha.TipoSugestao
             )
         )
 

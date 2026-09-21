@@ -91,3 +91,29 @@ class LoginEntrada(BaseModel):
         min_length=1,
         max_length=128
     )
+
+# ============================================================
+# CADASTRO PUBLICO
+# ============================================================
+
+class CadastroPublicoEntrada(BaseModel):
+
+    nome: str = Field(
+        ...,
+        min_length=2,
+        max_length=150
+    )
+
+    login: str = Field(
+        ...,
+        min_length=3,
+        max_length=100
+    )
+
+    email: EmailStr | None = None
+
+    senha: str = Field(
+        ...,
+        min_length=8,
+        max_length=128
+    )

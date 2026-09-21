@@ -1,5 +1,9 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
 from application.exceptions import TechnicalConfigurationError
+from services.configuracoes_inventario_aplicadas import (
+    obter_configuracao_aplicada,
+)
+
 
 # ============================================================
 # NORMALIZAÇÃO
@@ -339,55 +343,88 @@ def obter_configuracao_operacional_inventario(
     cursor,
     id_inventario: int
 ):
-
-    if id_inventario <= 0:
-
-                raise BusinessRuleViolation(
-            "Inventário inválido."
-        )
-
-    cursor.execute(
-        """
-        SELECT
-            ID_Inventario,
-            ClienteId,
-            Tipo
-
-        FROM dbo.Inventarios
-
-        WHERE ID_Inventario = ?
-        """,
-        id_inventario
+    configuracao = obter_configuracao_aplicada(
+        cursor=cursor,
+        id_inventario=id_inventario
     )
 
-    inventario = cursor.fetchone()
+    return {
+        "id_configuracao":
+            configuracao["id_configuracao_aplicada"],
 
-    if not inventario:
+        "id_inventario":
+            configuracao["id_inventario"],
 
-                raise NotFoundError(
-            "Inventário não encontrado."
-        )
+        "cliente_id":
+            configuracao["cliente_id"],
 
-    configuracao = (
-        obter_configuracao_operacional(
-            cursor=cursor,
-            cliente_id=inventario.ClienteId,
-            tipo_inventario=inventario.Tipo
-        )
-    )
+        "tipo_inventario":
+            configuracao["tipo_inventario"],
 
-    configuracao[
-        "id_inventario"
-    ] = inventario.ID_Inventario
+        "origem":
+            "INVENTARIO",
 
-    return configuracao
+        "versao":
+            configuracao["versao"],
+
+        "localizacao": {
+            "obrigatoria":
+                configuracao["localizacao_obrigatoria"],
+
+            "validar_estoque":
+                configuracao[
+                    "localizacao_validar_estoque"
+                ]
+        },
+
+        "codigo": {
+            "obrigatorio":
+                configuracao["codigo_obrigatorio"],
+
+            "validar_estoque":
+                configuracao["codigo_validar_estoque"]
+        },
+
+        "lote": {
+            "obrigatorio_quando_existir":
+                configuracao[
+                    "lote_obrigatorio_quando_existir"
+                ],
+
+            "validar_codigo":
+                configuracao["lote_validar_codigo"],
+
+            "selecao_automatica":
+                False
+        },
+
+        "quantidade": {
+            "obrigatoria":
+                configuracao["quantidade_obrigatoria"],
+
+            "minimo":
+                configuracao[
+                    "quantidade_operacional_minima"
+                ],
+
+            "maximo":
+                configuracao[
+                    "quantidade_operacional_maxima"
+                ]
+        },
+
+        "atualizado_por":
+            configuracao["alterado_por"]
+            or configuracao["criado_por"],
+
+        "data_hora_atualizacao":
+            configuracao["data_hora_alteracao"]
+            or configuracao["data_hora_criacao"]
+    }
 
 
 # ============================================================
-# SALVAR / ATUALIZAR CONFIGURAÇÃO
-#
-# Não realiza COMMIT.
-# A transação permanece responsabilidade do router.
+# SALVAR / ATUALIZAR CONFIGURACAO GERAL
 # ============================================================
 
 def salvar_configuracao_operacional(

@@ -30,6 +30,11 @@ from services.finalizacao_rotativo import (
 )
 
 
+from services.notificacoes import (
+    criar_por_permissao,
+)
+
+
 router = APIRouter(
     tags=["Finalização"]
 )
@@ -538,6 +543,40 @@ def finalizar_inventario(
         # ====================================================
         # 8. COMMIT
         # ====================================================
+
+        resumo_notificacoes = criar_por_permissao(
+            cursor=cursor,
+            codigo_permissao="ANALISE_VISUALIZAR",
+            id_usuario_ator=int(
+                usuario_atual["id_usuario"]
+            ),
+            tipo="INVENTARIO_FINALIZADO",
+            titulo="Invent\u00e1rio finalizado",
+            mensagem=(
+                f"O invent\u00e1rio "
+                f"{inventario.CodigoInventario} "
+                f"foi finalizado com sucesso."
+            ),
+            prioridade="MEDIA",
+            entidade_tipo="INVENTARIO",
+            entidade_id=id_inventario,
+            id_inventario=id_inventario,
+            url=(
+                f"/historico?"
+                f"inventario={id_inventario}"
+                f"&aba=visao-geral"
+            ),
+            chave_dedupe=(
+                "INVENTARIO_FINALIZADO:"
+                f"{id_inventario}"
+            ),
+            excluir_ator=False,
+        )
+
+        if isinstance(resultado, dict):
+            resultado["notificacoes"] = (
+                resumo_notificacoes
+            )
 
         uow.commit()
 

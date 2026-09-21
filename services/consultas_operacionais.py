@@ -1,6 +1,18 @@
 from domain.exceptions import BusinessRuleViolation
 from domain.exceptions import NotFoundError
 
+from services.analise_gestor import (
+    analisar_inventario_gestor,
+)
+from services.analise_rotativo import (
+    analisar_inventario_rotativo,
+)
+
+from services.configuracoes_inventario_aplicadas import (
+    obter_tipo_rodada_aplicada,
+    obter_tipo_proxima_rodada_aplicada,
+)
+
 
 # ============================================================
 # NORMALIZAÇÃO
@@ -14,6 +26,310 @@ def _texto(valor):
     return str(valor).strip()
 
 
+def _tipos_rodada_aplicados(
+    cursor,
+    id_inventario: int,
+    tipo_inventario: str,
+    numero_rodada: int,
+):
+    """Resolve a etapa pela configuracao congelada do inventario."""
+
+    try:
+        tipo_atual = obter_tipo_rodada_aplicada(
+            cursor=cursor,
+            id_inventario=id_inventario,
+            numero_rodada=numero_rodada,
+        )
+        tipo_proxima = obter_tipo_proxima_rodada_aplicada(
+            cursor=cursor,
+            id_inventario=id_inventario,
+            numero_rodada_atual=numero_rodada,
+        )
+    except (BusinessRuleViolation, NotFoundError):
+        tipo_normalizado = (tipo_inventario or "").strip().upper()
+        tipo_atual = (
+            "COMPLETA"
+            if numero_rodada == 1
+            or (tipo_normalizado == "OFICIAL" and numero_rodada <= 2)
+            else "DIVERGENCIAS"
+        )
+        tipo_proxima = "NAO_CONFIGURADA"
+
+    return (
+        str(tipo_atual or "NAO_CONFIGURADA").strip().upper(),
+        str(tipo_proxima or "NAO_CONFIGURADA").strip().upper(),
+    )
+
+
+
+def _tipos_rodadas_aplicados_em_lote(
+    cursor,
+    inventarios,
+):
+    """
+    Carrega a configura??o das rodadas em lote.
+
+    Evita consultar repetidamente a configura??o aplicada
+    para cada invent?rio retornado pela Central.
+    """
+
+    resultado = {}
+    ids = []
+
+    for inventario in inventarios:
+        id_inventario = int(
+            inventario.ID_Inventario
+        )
+
+        numero_rodada = int(
+            inventario.RodadaAtual or 0
+        )
+
+        tipo_inventario = (
+            _texto(inventario.Tipo) or ""
+        ).upper()
+
+        tipo_atual_padrao = (
+            "COMPLETA"
+            if (
+                numero_rodada == 1
+                or (
+                    tipo_inventario == "OFICIAL"
+                    and numero_rodada <= 2
+                )
+            )
+            else "DIVERGENCIAS"
+        )
+
+        resultado[id_inventario] = (
+            tipo_atual_padrao,
+            "NAO_CONFIGURADA",
+        )
+
+        ids.append(id_inventario)
+
+    if not ids:
+        return resultado
+
+    tamanho_bloco = 500
+
+    for inicio in range(
+        0,
+        len(ids),
+        tamanho_bloco,
+    ):
+        bloco = ids[
+            inicio:
+            inicio + tamanho_bloco
+        ]
+
+        placeholders = ", ".join(
+            "?"
+            for _ in bloco
+        )
+
+        cursor.execute(
+            f"""
+            SELECT
+                I.ID_Inventario,
+                I.RodadaAtual,
+
+                Configuracao.ID_ConfiguracaoAplicada,
+                Configuracao.MaxRodadas,
+
+                RodadaAtualAplicada.TipoRodada
+                    AS TipoRodadaAtual,
+
+                ProximaRodadaAplicada.TipoRodada
+                    AS TipoProximaRodada
+
+            FROM dbo.Inventarios I
+
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    A.ID_ConfiguracaoAplicada,
+                    A.MaxRodadas
+
+                FROM dbo.ConfiguracoesInventarioAplicadas A
+
+                WHERE
+                    A.ID_Inventario = I.ID_Inventario
+                    AND A.Ativa = 1
+
+                ORDER BY
+                    A.ID_ConfiguracaoAplicada DESC
+            ) Configuracao
+
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    R.TipoRodada
+
+                FROM
+                    dbo.ConfiguracoesRodadasInventarioAplicadas R
+
+                WHERE
+                    R.ID_ConfiguracaoAplicada =
+                        Configuracao.ID_ConfiguracaoAplicada
+                    AND R.NumeroRodada = I.RodadaAtual
+                    AND R.Ativa = 1
+
+                ORDER BY
+                    R.ID_ConfiguracaoRodadaAplicada DESC
+            ) RodadaAtualAplicada
+
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    R.TipoRodada
+
+                FROM
+                    dbo.ConfiguracoesRodadasInventarioAplicadas R
+
+                WHERE
+                    R.ID_ConfiguracaoAplicada =
+                        Configuracao.ID_ConfiguracaoAplicada
+                    AND R.NumeroRodada = I.RodadaAtual + 1
+                    AND R.Ativa = 1
+
+                ORDER BY
+                    R.ID_ConfiguracaoRodadaAplicada DESC
+            ) ProximaRodadaAplicada
+
+            WHERE
+                I.ID_Inventario IN ({placeholders})
+            """,
+            tuple(bloco),
+        )
+
+        for linha in cursor.fetchall():
+            id_inventario = int(
+                linha.ID_Inventario
+            )
+
+            if (
+                linha.ID_ConfiguracaoAplicada
+                is None
+            ):
+                continue
+
+            numero_rodada = int(
+                linha.RodadaAtual or 0
+            )
+
+            max_rodadas = int(
+                linha.MaxRodadas or 0
+            )
+
+            tipo_atual = (
+                _texto(
+                    linha.TipoRodadaAtual
+                )
+                or "NAO_CONFIGURADA"
+            ).upper()
+
+            if (
+                numero_rodada + 1
+                > max_rodadas
+            ):
+                tipo_proxima = "FINALIZADO"
+            else:
+                tipo_proxima = (
+                    _texto(
+                        linha.TipoProximaRodada
+                    )
+                    or "NAO_CONFIGURADA"
+                ).upper()
+
+            resultado[id_inventario] = (
+                tipo_atual,
+                tipo_proxima,
+            )
+
+    return resultado
+
+
+def _resumo_localizacoes_por_tipo_rodada(
+    cursor,
+    id_inventario: int,
+    id_rodada: int | None,
+    tipo_rodada: str,
+):
+    """Conta somente o universo operacional da rodada atual."""
+
+    if not id_rodada or tipo_rodada == "GESTOR":
+        return 0, 0, 0, 0
+
+    if tipo_rodada == "COMPLETA":
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS TotalLocalizacoes,
+                COALESCE(SUM(CASE
+                    WHEN UltimaSessao.ID_Sessao IS NULL THEN 1
+                    ELSE 0
+                END), 0) AS Pendentes,
+                COALESCE(SUM(CASE
+                    WHEN UltimaSessao.Status = 'ABERTA' THEN 1
+                    ELSE 0
+                END), 0) AS EmContagem,
+                COALESCE(SUM(CASE
+                    WHEN UltimaSessao.ID_Sessao IS NOT NULL
+                         AND UltimaSessao.Status <> 'ABERTA' THEN 1
+                    ELSE 0
+                END), 0) AS Concluidas
+            FROM dbo.InventarioEscopoLocalizacoes E
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    S.ID_Sessao,
+                    S.Status
+                FROM dbo.SessoesContagem S
+                WHERE
+                    S.ID_Inventario = E.ID_Inventario
+                    AND S.ID_Rodada = ?
+                    AND S.Localizacao = E.Localizacao
+                ORDER BY S.ID_Sessao DESC
+            ) UltimaSessao
+            WHERE
+                E.ID_Inventario = ?
+                AND E.Selecionado = 1
+            """,
+            (id_rodada, id_inventario),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS TotalLocalizacoes,
+                COALESCE(SUM(CASE
+                    WHEN Status = 'PENDENTE' THEN 1
+                    ELSE 0
+                END), 0) AS Pendentes,
+                COALESCE(SUM(CASE
+                    WHEN Status = 'EM_CONTAGEM' THEN 1
+                    ELSE 0
+                END), 0) AS EmContagem,
+                COALESCE(SUM(CASE
+                    WHEN Status = 'CONCLUIDA' THEN 1
+                    ELSE 0
+                END), 0) AS Concluidas
+            FROM dbo.RodadaLocalizacoes
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+            """,
+            (id_inventario, id_rodada),
+        )
+
+    linha = cursor.fetchone()
+    if not linha:
+        return 0, 0, 0, 0
+
+    return tuple(int(valor or 0) for valor in linha[:4])
+
+
 # ============================================================
 # LISTAR INVENTÁRIOS
 # ============================================================
@@ -22,51 +338,33 @@ def listar_inventarios(
     cursor,
     status: str | None = None,
     tipo: str | None = None,
-    cliente_id: int | None = None
+    cliente_id: int | None = None,
+    id_inventario: int | None = None
 ):
 
     filtros = []
     parametros = []
 
     if status:
-
-        filtros.append(
-            "I.Status = ?"
-        )
-
-        parametros.append(
-            status.strip().upper()
-        )
+        filtros.append("I.Status = ?")
+        parametros.append(status.strip().upper())
 
     if tipo:
-
-        filtros.append(
-            "I.Tipo = ?"
-        )
-
-        parametros.append(
-            tipo.strip().upper()
-        )
+        filtros.append("I.Tipo = ?")
+        parametros.append(tipo.strip().upper())
 
     if cliente_id is not None:
+        filtros.append("I.ClienteId = ?")
+        parametros.append(cliente_id)
 
-        filtros.append(
-            "I.ClienteId = ?"
-        )
-
-        parametros.append(
-            cliente_id
-        )
+    if id_inventario is not None:
+        filtros.append("I.ID_Inventario = ?")
+        parametros.append(id_inventario)
 
     where = ""
 
     if filtros:
-
-        where = (
-            "WHERE "
-            +
-            " AND ".join(filtros)
-        )
+        where = "WHERE " + " AND ".join(filtros)
 
     cursor.execute(
         f"""
@@ -80,6 +378,9 @@ def listar_inventarios(
             I.cArmazem,
             I.RodadaAtual,
             I.Status,
+            I.EmAnaliseGestor,
+            I.DataHoraEncaminhamentoGestor,
+            I.EncaminhadoGestorPor,
             I.DataHoraInicio,
             I.DataHoraFim,
             I.CriadoPor,
@@ -87,15 +388,27 @@ def listar_inventarios(
 
             (
                 SELECT COUNT(*)
-
                 FROM dbo.RodadasInventario R
+                WHERE R.ID_Inventario = I.ID_Inventario
+            ) AS TotalRodadas,
 
-                WHERE
-                    R.ID_Inventario =
-                    I.ID_Inventario
-            ) AS TotalRodadas
+            RodadaAtualInfo.ID_Rodada AS IDRodadaAtual,
+            RodadaAtualInfo.Status AS StatusRodada
 
         FROM dbo.Inventarios I
+
+        OUTER APPLY
+        (
+            SELECT TOP 1
+                R.ID_Rodada,
+                R.Status
+            FROM dbo.RodadasInventario R
+            WHERE
+                R.ID_Inventario = I.ID_Inventario
+                AND R.NumeroRodada = I.RodadaAtual
+            ORDER BY R.ID_Rodada DESC
+        ) RodadaAtualInfo
+
 
         {where}
 
@@ -107,52 +420,437 @@ def listar_inventarios(
 
     linhas = cursor.fetchall()
 
-    return [
-        {
-            "id_inventario":
-                linha.ID_Inventario,
+    tipos_rodadas_por_inventario = (
+        _tipos_rodadas_aplicados_em_lote(
+            cursor=cursor,
+            inventarios=linhas,
+        )
+    )
 
-            "codigo_inventario":
-                linha.CodigoInventario,
+    resultado = []
 
-            "tipo":
-                linha.Tipo,
+    for linha in linhas:
+        status_inventario = _texto(linha.Status) or ""
+        status_normalizado = status_inventario.upper()
 
-            "cliente":
-                linha.Cliente,
+        tipo_inventario = (
+            _texto(linha.Tipo) or ""
+        ).upper()
 
-            "cliente_id":
-                linha.ClienteId,
+        (
+            tipo_rodada_atual,
+            tipo_proxima_rodada,
+        ) = tipos_rodadas_por_inventario.get(
+            int(linha.ID_Inventario),
+            (
+                "NAO_CONFIGURADA",
+                "NAO_CONFIGURADA",
+            ),
+        )
 
-            "descricao":
-                linha.Descricao,
+        inventario_encerrado = (
+            status_normalizado
+            in {
+                "FINALIZADO",
+                "ENCERRADO",
+                "CANCELADO",
+            }
+        )
 
-            "armazem":
-                linha.cArmazem,
+        if inventario_encerrado:
+            (
+                total_localizacoes,
+                localizacoes_pendentes,
+                localizacoes_em_contagem,
+                localizacoes_concluidas,
+            ) = (0, 0, 0, 0)
+        else:
+            (
+                total_localizacoes,
+                localizacoes_pendentes,
+                localizacoes_em_contagem,
+                localizacoes_concluidas,
+            ) = _resumo_localizacoes_por_tipo_rodada(
+                cursor=cursor,
+                id_inventario=linha.ID_Inventario,
+                id_rodada=linha.IDRodadaAtual,
+                tipo_rodada=tipo_rodada_atual,
+            )
 
-            "rodada_atual":
-                linha.RodadaAtual,
+        percentual_progresso = (
+            round(
+                (
+                    localizacoes_concluidas
+                    / total_localizacoes
+                ) * 100,
+                2
+            )
+            if total_localizacoes > 0
+            else 0.0
+        )
 
-            "status":
-                linha.Status,
+        if status_normalizado in {"FINALIZADO", "ENCERRADO"}:
+            fase_operacional = "FINALIZADO"
+            proxima_acao = "CONSULTAR_RESULTADO"
 
-            "data_hora_inicio":
-                linha.DataHoraInicio,
+        elif status_normalizado == "CANCELADO":
+            fase_operacional = "CANCELADO"
+            proxima_acao = "CONSULTAR_INVENTARIO"
 
-            "data_hora_fim":
-                linha.DataHoraFim,
+        elif bool(linha.EmAnaliseGestor) or tipo_rodada_atual == "GESTOR":
+            fase_operacional = "AGUARDANDO_GESTOR"
+            proxima_acao = "ANALISAR_GESTOR"
 
-            "criado_por":
-                linha.CriadoPor,
+        elif total_localizacoes == 0:
+            fase_operacional = "DEFINIR_ESCOPO"
+            proxima_acao = "DEFINIR_LOCALIZACOES"
 
-            "finalizado_por":
-                linha.FinalizadoPor,
+        elif (
+            tipo_rodada_atual == "DIVERGENCIAS"
+            and localizacoes_em_contagem > 0
+        ):
+            fase_operacional = "EM_RECONTAGEM"
+            proxima_acao = "ACOMPANHAR_RECONTAGEM"
 
-            "total_rodadas":
-                linha.TotalRodadas
-        }
-        for linha in linhas
-    ]
+        elif (
+            tipo_rodada_atual == "DIVERGENCIAS"
+            and localizacoes_pendentes > 0
+        ):
+            fase_operacional = "AGUARDANDO_RECONTAGEM"
+            proxima_acao = "ACOMPANHAR_RECONTAGEM"
+
+        elif localizacoes_em_contagem > 0:
+            fase_operacional = "EM_CONTAGEM"
+            proxima_acao = "CONTINUAR_CONTAGEM"
+
+        elif localizacoes_pendentes > 0:
+            fase_operacional = "AGUARDANDO_CONTAGEM"
+            proxima_acao = "INICIAR_CONTAGEM"
+
+        else:
+            fase_operacional = "RODADA_CONCLUIDA"
+            proxima_acao = "REVISAR_RODADA"
+
+        analise_disponivel = False
+        total_divergencias = 0
+        divergencias_sem_decisao = 0
+        recontagens_pendentes = 0
+        divergencias_justificadas = 0
+        divergencias_resolvidas = 0
+        pode_finalizar = False
+        pode_gerar_recontagem = False
+
+        rodada_operacional_concluida = (
+            total_localizacoes > 0
+            and
+            localizacoes_concluidas
+            >= total_localizacoes
+            and
+            localizacoes_pendentes == 0
+            and
+            localizacoes_em_contagem == 0
+        )
+
+        proxima_rodada_operacional_configurada = (
+            tipo_inventario == "OFICIAL"
+            and tipo_proxima_rodada in {"COMPLETA", "DIVERGENCIAS"}
+        )
+
+        deve_analisar_divergencias = (
+            status_normalizado == "ABERTO"
+            and
+            total_localizacoes > 0
+            and
+            (
+                rodada_operacional_concluida
+                or
+                bool(linha.EmAnaliseGestor)
+            )
+            and not (
+                rodada_operacional_concluida
+                and proxima_rodada_operacional_configurada
+            )
+        )
+
+        if (
+            status_normalizado == "ABERTO"
+            and rodada_operacional_concluida
+            and proxima_rodada_operacional_configurada
+        ):
+            fase_operacional = "PROXIMA_RODADA_DISPONIVEL"
+            proxima_acao = "GERAR_PROXIMA_RODADA"
+
+        if deve_analisar_divergencias:
+
+            try:
+
+                if tipo_inventario == "OFICIAL":
+
+                    analise = (
+                        analisar_inventario_gestor(
+                            cursor=cursor,
+                            id_inventario=linha.ID_Inventario
+                        )
+                    )
+
+                    resumo_analise = (
+                        analise.get("resumo")
+                        or {}
+                    )
+
+                    total_divergencias = int(
+                        resumo_analise.get(
+                            "itens_para_decisao_gestor",
+                            0
+                        )
+                        or 0
+                    )
+
+                    divergencias_sem_decisao = int(
+                        resumo_analise.get(
+                            "itens_sem_decisao",
+                            0
+                        )
+                        or 0
+                    )
+
+                    recontagens_pendentes = int(
+                        resumo_analise.get(
+                            "nova_recontagem",
+                            0
+                        )
+                        or 0
+                    )
+
+                    divergencias_resolvidas = int(
+                        resumo_analise.get(
+                            "itens_resolvidos_gestor",
+                            0
+                        )
+                        or 0
+                    )
+
+                    pode_finalizar = bool(
+                        analise.get(
+                            "pode_finalizar_inventario"
+                        )
+                    ) and bool(
+                        analise.get(
+                            "operacao_concluida"
+                        )
+                    )
+
+                    pode_gerar_recontagem = bool(
+                        analise.get(
+                            "pode_gerar_nova_recontagem"
+                        )
+                    )
+
+                    analise_disponivel = True
+
+                elif tipo_inventario == "ROTATIVO":
+
+                    analise = (
+                        analisar_inventario_rotativo(
+                            cursor=cursor,
+                            id_inventario=linha.ID_Inventario
+                        )
+                    )
+
+                    resumo_analise = (
+                        analise.get("resumo")
+                        or {}
+                    )
+
+                    total_divergencias = int(
+                        resumo_analise.get(
+                            "itens_requerem_decisao",
+                            0
+                        )
+                        or 0
+                    )
+
+                    divergencias_sem_decisao = int(
+                        resumo_analise.get(
+                            "itens_sem_decisao",
+                            0
+                        )
+                        or 0
+                    )
+
+                    recontagens_pendentes = int(
+                        resumo_analise.get(
+                            "itens_para_recontagem",
+                            0
+                        )
+                        or 0
+                    )
+
+                    divergencias_justificadas = int(
+                        resumo_analise.get(
+                            "divergencias_justificadas",
+                            0
+                        )
+                        or 0
+                    )
+
+                    divergencias_resolvidas = int(
+                        resumo_analise.get(
+                            "itens_resolvidos",
+                            0
+                        )
+                        or 0
+                    )
+
+                    pode_finalizar = bool(
+                        analise.get(
+                            "pode_finalizar_inventario"
+                        )
+                    )
+
+                    pode_gerar_recontagem = bool(
+                        analise.get(
+                            "pode_gerar_recontagem"
+                        )
+                    )
+
+                    analise_disponivel = True
+
+            except (
+                BusinessRuleViolation,
+                NotFoundError,
+            ):
+                analise_disponivel = False
+
+        # ====================================================
+        # FASE AP?S A AN?LISE DAS DIVERG?NCIAS
+        # ====================================================
+
+        if analise_disponivel:
+
+            if divergencias_sem_decisao > 0:
+
+                if tipo_inventario == "OFICIAL":
+                    fase_operacional = (
+                        "AGUARDANDO_GESTOR"
+                    )
+                    proxima_acao = (
+                        "ANALISAR_GESTOR"
+                    )
+
+                else:
+                    fase_operacional = (
+                        "AGUARDANDO_DECISAO"
+                    )
+                    proxima_acao = (
+                        "ANALISAR_ROTATIVO"
+                    )
+
+            elif recontagens_pendentes > 0:
+
+                fase_operacional = (
+                    "RECONTAGEM_PENDENTE"
+                )
+
+                proxima_acao = (
+                    "GERAR_RECONTAGEM"
+                )
+
+            elif pode_finalizar:
+
+                fase_operacional = (
+                    "PRONTO_FINALIZAR"
+                )
+
+                proxima_acao = (
+                    "FINALIZAR_INVENTARIO"
+                )
+
+            else:
+
+                fase_operacional = (
+                    "RODADA_CONCLUIDA"
+                )
+
+                proxima_acao = (
+                    "REVISAR_RODADA"
+                )
+
+        resultado.append(
+            {
+                "id_inventario": linha.ID_Inventario,
+                "codigo_inventario": linha.CodigoInventario,
+                "tipo": linha.Tipo,
+                "cliente": linha.Cliente,
+                "cliente_id": linha.ClienteId,
+                "descricao": linha.Descricao,
+                "armazem": linha.cArmazem,
+                "rodada_atual": linha.RodadaAtual,
+                "status": linha.Status,
+                "em_analise_gestor": bool(
+                    linha.EmAnaliseGestor
+                ),
+                "data_hora_encaminhamento_gestor":
+                    linha.DataHoraEncaminhamentoGestor,
+                "encaminhado_gestor_por":
+                    _texto(linha.EncaminhadoGestorPor),
+                "data_hora_inicio": linha.DataHoraInicio,
+                "data_hora_fim": linha.DataHoraFim,
+                "criado_por": linha.CriadoPor,
+                "finalizado_por": linha.FinalizadoPor,
+                "total_rodadas": int(
+                    linha.TotalRodadas or 0
+                ),
+                "id_rodada_atual": linha.IDRodadaAtual,
+                "status_rodada":
+                    _texto(linha.StatusRodada),
+                "total_localizacoes": total_localizacoes,
+                "localizacoes_pendentes":
+                    localizacoes_pendentes,
+                "localizacoes_em_contagem":
+                    localizacoes_em_contagem,
+                "localizacoes_concluidas":
+                    localizacoes_concluidas,
+                "percentual_progresso":
+                    percentual_progresso,
+                "fase_operacional":
+                    fase_operacional,
+                "proxima_acao":
+                    proxima_acao,
+
+                "tipo_rodada_atual":
+                    tipo_rodada_atual,
+
+                "tipo_proxima_rodada":
+                    tipo_proxima_rodada,
+
+                "analise_disponivel":
+                    analise_disponivel,
+
+                "total_divergencias":
+                    total_divergencias,
+
+                "divergencias_sem_decisao":
+                    divergencias_sem_decisao,
+
+                "recontagens_pendentes":
+                    recontagens_pendentes,
+
+                "divergencias_justificadas":
+                    divergencias_justificadas,
+
+                "divergencias_resolvidas":
+                    divergencias_resolvidas,
+
+                "pode_finalizar":
+                    pode_finalizar,
+
+                "pode_gerar_recontagem":
+                    pode_gerar_recontagem
+            }
+        )
+
+    return resultado
 
 
 # ============================================================
@@ -176,6 +874,9 @@ def consultar_inventario(
             cArmazem,
             RodadaAtual,
             Status,
+            EmAnaliseGestor,
+            DataHoraEncaminhamentoGestor,
+            EncaminhadoGestorPor,
             DataHoraInicio,
             DataHoraFim,
             CriadoPor,
@@ -196,6 +897,18 @@ def consultar_inventario(
         raise NotFoundError(
             "Inventário não encontrado."
         )
+
+    resumo_operacional = listar_inventarios(
+        cursor=cursor,
+        id_inventario=id_inventario
+    )
+
+    if not resumo_operacional:
+        raise NotFoundError(
+            "Inventario operacional nao encontrado."
+        )
+
+    operacional = resumo_operacional[0]
 
     return {
         "id_inventario":
@@ -225,6 +938,15 @@ def consultar_inventario(
         "status":
             linha.Status,
 
+        "em_analise_gestor":
+            bool(linha.EmAnaliseGestor),
+
+        "data_hora_encaminhamento_gestor":
+            linha.DataHoraEncaminhamentoGestor,
+
+        "encaminhado_gestor_por":
+            _texto(linha.EncaminhadoGestorPor),
+
         "data_hora_inicio":
             linha.DataHoraInicio,
 
@@ -238,7 +960,46 @@ def consultar_inventario(
             linha.DataHoraCriacao,
 
         "finalizado_por":
-            linha.FinalizadoPor
+            linha.FinalizadoPor,
+
+        "fase_operacional":
+            operacional["fase_operacional"],
+
+        "proxima_acao":
+            operacional["proxima_acao"],
+
+        "analise_disponivel":
+            operacional["analise_disponivel"],
+
+        "pode_finalizar":
+            operacional["pode_finalizar"],
+
+        "pode_gerar_recontagem":
+            operacional["pode_gerar_recontagem"],
+
+        "total_localizacoes":
+            operacional["total_localizacoes"],
+
+        "localizacoes_pendentes":
+            operacional["localizacoes_pendentes"],
+
+        "localizacoes_em_contagem":
+            operacional["localizacoes_em_contagem"],
+
+        "total_divergencias":
+            operacional["total_divergencias"],
+
+        "divergencias_sem_decisao":
+            operacional["divergencias_sem_decisao"],
+
+        "recontagens_pendentes":
+            operacional["recontagens_pendentes"],
+
+        "localizacoes_concluidas":
+            operacional["localizacoes_concluidas"],
+
+        "percentual_progresso":
+            operacional["percentual_progresso"]
     }
 
 
@@ -369,13 +1130,42 @@ def consultar_localizacoes_inventario(
     )
 
     # ========================================================
-    # ROTATIVO / RODADAS COMPLETAS
+    # ESCOPO COMPLETO: R1 OU R2 OFICIAL CONFIGURADA COMO COMPLETA
     # ========================================================
 
+    usar_escopo_completo = (
+        rodada_atual == 1
+    )
+
     if (
-        tipo == "ROTATIVO"
-        or rodada_atual <= 2
+        tipo == "OFICIAL"
+        and rodada_atual == 2
     ):
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.RodadaLocalizacoes
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+            """,
+            (
+                id_inventario,
+                id_rodada
+            )
+        )
+
+        possui_escopo_da_rodada = (
+            int(
+                cursor.fetchone()[0] or 0
+            ) > 0
+        )
+
+        usar_escopo_completo = (
+            not possui_escopo_da_rodada
+        )
+
+    if usar_escopo_completo:
 
         cursor.execute(
             """
@@ -468,7 +1258,7 @@ def consultar_localizacoes_inventario(
         }
 
     # ========================================================
-    # OFICIAL R3+
+    # ESCOPO ESPECIFICO DA RODADA
     # ========================================================
 
     cursor.execute(
@@ -696,17 +1486,46 @@ def consultar_detalhe_localizacao(
     # ========================================================
     # 3. VALIDA SE LOCALIZAÇÃO PERTENCE À RODADA
     #
-    # ROTATIVO / R1 / R2:
+    # R1 OU R2 OFICIAL COMPLETA:
     # InventarioEscopoLocalizacoes
     #
-    # OFICIAL R3+:
+    # RODADAS COM ESCOPO ESPECIFICO:
     # RodadaLocalizacoes
     # ========================================================
 
+    usar_escopo_completo_localizacao = (
+        rodada.NumeroRodada == 1
+    )
+
     if (
-        tipo == "ROTATIVO"
-        or rodada.NumeroRodada <= 2
+        tipo == "OFICIAL"
+        and rodada.NumeroRodada == 2
     ):
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM dbo.RodadaLocalizacoes
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+            """,
+            (
+                id_inventario,
+                id_rodada
+            )
+        )
+
+        possui_localizacoes_da_rodada = (
+            int(
+                cursor.fetchone()[0] or 0
+            ) > 0
+        )
+
+        usar_escopo_completo_localizacao = (
+            not possui_localizacoes_da_rodada
+        )
+
+    if usar_escopo_completo_localizacao:
 
         cursor.execute(
             """
@@ -786,7 +1605,9 @@ def consultar_detalhe_localizacao(
             Status,
             DataHoraInicio,
             DataHoraFim,
-            LocalizacaoVazia
+            LocalizacaoVazia,
+            UsuarioAberturaLogin,
+            UsuarioAberturaNome
 
         FROM dbo.SessoesContagem
 
@@ -809,6 +1630,26 @@ def consultar_detalhe_localizacao(
     ultima_sessao = (
         cursor.fetchone()
     )
+
+    usuario_sessao_login = None
+    usuario_sessao_nome = None
+
+    if ultima_sessao:
+        usuario_sessao_login = (
+            str(
+                ultima_sessao.UsuarioAberturaLogin
+            ).strip()
+            if ultima_sessao.UsuarioAberturaLogin
+            else None
+        )
+
+        usuario_sessao_nome = (
+            str(
+                ultima_sessao.UsuarioAberturaNome
+            ).strip()
+            if ultima_sessao.UsuarioAberturaNome
+            else usuario_sessao_login
+        )
 
     # ========================================================
     # 5. DEFINE STATUS OPERACIONAL
@@ -1061,6 +1902,12 @@ def consultar_detalhe_localizacao(
         "id_sessao_atual":
             id_sessao_atual,
 
+        "usuario_sessao_login":
+            usuario_sessao_login,
+
+        "usuario_sessao_nome":
+            usuario_sessao_nome,
+
         "localizacao_vazia":
             localizacao_vazia,
 
@@ -1147,6 +1994,104 @@ def buscar_produto_contagem(
         raise NotFoundError(
             "Inventário não encontrado."
         )
+
+    if _texto(inventario.Status).upper() != "ABERTO":
+
+        raise BusinessRuleViolation(
+            "O inventário não está aberto para contagem."
+        )
+
+    # ========================================================
+    # 2. BUSCA DADOS CADASTRAIS NO SNAPSHOT
+    #
+    # A consulta preserva a contagem cega. Nenhuma quantidade
+    # ou saldo é selecionado ou devolvido ao operador.
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT DISTINCT
+            Codigo AS Codigo,
+            ISNULL(Lote, '') AS Lote,
+            Descricao AS Produto,
+            Unidade,
+            Categoria
+
+        FROM dbo.InventarioEstoqueSnapshot
+
+        WHERE
+            ID_Inventario = ?
+            AND LTRIM(RTRIM(Codigo)) = ?
+
+        ORDER BY
+            Lote
+        """,
+        (
+            id_inventario,
+            codigo
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    if not linhas:
+
+        raise NotFoundError(
+            "Produto não encontrado no estoque deste inventário."
+        )
+
+    lotes = sorted({
+        _texto(linha.Lote)
+        for linha in linhas
+        if _texto(linha.Lote)
+    })
+
+    produto = linhas[0]
+    possui_lote = bool(lotes)
+
+    return {
+        "valido":
+            True,
+
+        "id_inventario":
+            inventario.ID_Inventario,
+
+        "codigo_inventario":
+            inventario.CodigoInventario,
+
+        "tipo_inventario":
+            inventario.Tipo,
+
+        "status_inventario":
+            inventario.Status,
+
+        "codigo":
+            produto.Codigo,
+
+        "produto":
+            produto.Produto,
+
+        "unidade":
+            produto.Unidade,
+
+        "categoria":
+            produto.Categoria,
+
+        "possui_lote":
+            possui_lote,
+
+        "lotes":
+            lotes,
+
+        "contagem_cega":
+            True,
+
+        "proximo_passo": (
+            "INFORMAR_LOTE"
+            if possui_lote
+            else "INFORMAR_QUANTIDADE"
+        )
+    }
 
    # ============================================================
 # VALIDAR LOTE BIPADO
@@ -1249,4 +2194,223 @@ def validar_lote_contagem(
 
         "proximo_passo":
             "INFORMAR_QUANTIDADE"
+    }
+
+
+
+# PAGINACAO_CENTRAL_SGI_V1
+from datetime import datetime
+
+
+def _prioridade_fase_central(fase: str) -> int:
+    prioridades = {
+        "AGUARDANDO_GESTOR": 0,
+        "AGUARDANDO_DECISAO": 0,
+        "RECONTAGEM_PENDENTE": 1,
+        "AGUARDANDO_RECONTAGEM": 1,
+        "EM_RECONTAGEM": 1,
+        "PROXIMA_RODADA_DISPONIVEL": 2,
+        "PRONTO_FINALIZAR": 2,
+        "RODADA_CONCLUIDA": 3,
+        "EM_CONTAGEM": 4,
+        "AGUARDANDO_CONTAGEM": 5,
+        "DEFINIR_ESCOPO": 6,
+        "FINALIZADO": 7,
+        "CANCELADO": 8,
+    }
+    return prioridades.get(str(fase or "").upper(), 99)
+
+
+def _data_central(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return valor.replace(tzinfo=None)
+    try:
+        return datetime.fromisoformat(str(valor).replace("Z", "+00:00")).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
+def listar_inventarios_central(
+    cursor,
+    pagina: int = 1,
+    por_pagina: int = 25,
+    pesquisa: str | None = None,
+    tipo: str | None = None,
+    status: str | None = None,
+    cliente_id: int | None = None,
+    fase: str | None = "ATIVAS",
+    pendencias: str | None = "TODAS",
+    periodo: str | None = "QUALQUER",
+    data_inicial: str | None = None,
+    data_final: str | None = None,
+):
+    """Entrega somente a pagina exibida pela Central, preservando suas regras."""
+    todos = listar_inventarios(cursor=cursor)
+    terminais = {"FINALIZADO", "CANCELADO"}
+
+    status_disponiveis = sorted({
+        str(item.get("status") or "").strip().upper()
+        for item in todos
+        if item.get("status")
+    })
+    fases_disponiveis = sorted(
+        {
+            str(item.get("fase_operacional") or "").strip().upper()
+            for item in todos
+            if item.get("fase_operacional")
+        },
+        key=_prioridade_fase_central,
+    )
+
+    clientes = {}
+    for item in todos:
+        nome = str(item.get("cliente") or "").strip()
+        nome_normalizado = nome.upper()
+        if "ENDRESS+HAUSER" not in nome_normalizado and nome_normalizado != "UM GRAU E MEIO":
+            continue
+        identificador = int(item.get("cliente_id") or 0)
+        if identificador > 0:
+            clientes[identificador] = nome
+
+    inventarios_ativos = [
+        item for item in todos
+        if str(item.get("status") or "").strip().upper() not in terminais
+    ]
+
+    ano = datetime.now().year
+    prefixo = f"INV-{ano}-"
+    maior_sequencia = 0
+    for item in todos:
+        codigo = str(item.get("codigo_inventario") or "")
+        if not codigo.startswith(prefixo):
+            continue
+        try:
+            maior_sequencia = max(maior_sequencia, int(codigo[len(prefixo):]))
+        except ValueError:
+            pass
+    proximo_codigo = f"{prefixo}{maior_sequencia + 1:03d}"
+
+    termo = str(pesquisa or "").strip().casefold()
+    tipo_normalizado = str(tipo or "TODOS").strip().upper()
+    status_normalizado = str(status or "TODOS").strip().upper()
+    pendencias_normalizadas = str(pendencias or "TODAS").strip().upper()
+    periodo_normalizado = str(periodo or "QUALQUER").strip().upper()
+
+    hoje = datetime.now()
+    inicio = fim = None
+    if periodo_normalizado == "HOJE":
+        inicio = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje.replace(hour=23, minute=59, second=59, microsecond=999999)
+    elif periodo_normalizado in {"ULTIMOS_7_DIAS", "ULTIMOS_30_DIAS"}:
+        from datetime import timedelta
+        dias = 6 if periodo_normalizado == "ULTIMOS_7_DIAS" else 29
+        inicio = (hoje - timedelta(days=dias)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = hoje.replace(hour=23, minute=59, second=59, microsecond=999999)
+    elif periodo_normalizado == "ESTE_MES":
+        inicio = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if hoje.month == 12:
+            proximo_mes = hoje.replace(year=hoje.year + 1, month=1, day=1)
+        else:
+            proximo_mes = hoje.replace(month=hoje.month + 1, day=1)
+        from datetime import timedelta
+        fim = proximo_mes - timedelta(microseconds=1)
+    elif periodo_normalizado == "PERSONALIZADO":
+        try:
+            inicio = datetime.fromisoformat(data_inicial) if data_inicial else None
+        except ValueError:
+            inicio = None
+        try:
+            fim = datetime.fromisoformat(data_final).replace(hour=23, minute=59, second=59, microsecond=999999) if data_final else None
+        except ValueError:
+            fim = None
+
+    base = []
+    for item in todos:
+        campos = (
+            item.get("id_inventario"),
+            item.get("codigo_inventario"),
+            item.get("cliente"),
+            item.get("cliente_id"),
+            item.get("armazem"),
+        )
+        if termo and not any(termo in str(valor or "").casefold() for valor in campos):
+            continue
+        if tipo_normalizado != "TODOS" and str(item.get("tipo") or "").upper() != tipo_normalizado:
+            continue
+        if status_normalizado != "TODOS" and str(item.get("status") or "").upper() != status_normalizado:
+            continue
+        if cliente_id is not None and int(item.get("cliente_id") or 0) != cliente_id:
+            continue
+
+        tem_pendencias = (
+            int(item.get("total_localizacoes") or 0) == 0
+            or int(item.get("localizacoes_pendentes") or 0) > 0
+            or int(item.get("localizacoes_em_contagem") or 0) > 0
+        )
+        if pendencias_normalizadas == "COM_PENDENCIAS" and not tem_pendencias:
+            continue
+        if pendencias_normalizadas == "SEM_PENDENCIAS" and tem_pendencias:
+            continue
+
+        if inicio or fim:
+            data_item = _data_central(item.get("data_hora_inicio"))
+            if data_item is None or (inicio and data_item < inicio) or (fim and data_item > fim):
+                continue
+        base.append(item)
+
+    def contar(fases):
+        return sum(1 for item in base if str(item.get("fase_operacional") or "").upper() in fases)
+
+    totais = {
+        "preparacao": contar({"DEFINIR_ESCOPO"}),
+        "execucao": contar({"AGUARDANDO_CONTAGEM", "EM_CONTAGEM", "AGUARDANDO_RECONTAGEM", "EM_RECONTAGEM"}),
+        "aguardando_decisao": contar({"AGUARDANDO_GESTOR", "AGUARDANDO_DECISAO"}),
+        "recontagem": contar({"RECONTAGEM_PENDENTE", "AGUARDANDO_RECONTAGEM", "EM_RECONTAGEM"}),
+        "pronto_finalizar": contar({"PRONTO_FINALIZAR"}),
+        "encerrados": contar(terminais),
+    }
+
+    fase_normalizada = str(fase or "ATIVAS").strip().upper()
+    filtrados = []
+    for item in base:
+        fase_item = str(item.get("fase_operacional") or "").strip().upper()
+        corresponde = (
+            fase_normalizada == "TODAS"
+            or (fase_normalizada == "ATIVAS" and fase_item not in terminais)
+            or (fase_normalizada == "EM_EXECUCAO" and fase_item in {"AGUARDANDO_CONTAGEM", "EM_CONTAGEM", "AGUARDANDO_RECONTAGEM", "EM_RECONTAGEM"})
+            or (fase_normalizada == "AGUARDANDO_DECISAO_GERAL" and fase_item in {"AGUARDANDO_GESTOR", "AGUARDANDO_DECISAO"})
+            or (fase_normalizada == "ENCERRADOS" and fase_item in terminais)
+            or fase_item == fase_normalizada
+        )
+        if corresponde:
+            filtrados.append(item)
+
+    filtrados.sort(key=lambda item: (
+        _prioridade_fase_central(item.get("fase_operacional")),
+        -int(item.get("id_inventario") or 0),
+    ))
+
+    por_pagina = max(1, min(int(por_pagina or 25), 100))
+    total_registros = len(filtrados)
+    total_paginas = max(1, (total_registros + por_pagina - 1) // por_pagina)
+    pagina = max(1, min(int(pagina or 1), total_paginas))
+    inicio_pagina = (pagina - 1) * por_pagina
+
+    return {
+        "itens": filtrados[inicio_pagina:inicio_pagina + por_pagina],
+        "pagina": pagina,
+        "por_pagina": por_pagina,
+        "total_registros": total_registros,
+        "total_paginas": total_paginas,
+        "totais": totais,
+        "status_disponiveis": status_disponiveis,
+        "clientes_filtro": [
+            {"id": identificador, "nome": nome}
+            for identificador, nome in sorted(clientes.items(), key=lambda par: par[1].casefold())
+        ],
+        "fases_disponiveis": fases_disponiveis,
+        "inventarios_ativos": inventarios_ativos,
+        "proximo_codigo": proximo_codigo,
     }

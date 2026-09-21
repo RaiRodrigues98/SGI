@@ -152,22 +152,54 @@ def _buscar_localizacoes_planejadas(
     cursor.execute(
         """
         SELECT COUNT(
-            DISTINCT UPPER(
-                LTRIM(
-                    RTRIM(Localizacao)
-                )
-            )
+            DISTINCT X.Localizacao
         )
+        FROM
+        (
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(RL.Localizacao)
+                    )
+                ) AS Localizacao
 
-        FROM dbo.RodadaLocalizacoes
+            FROM dbo.RodadaLocalizacoes RL
 
-        WHERE
-            ID_Inventario = ?
-            AND ID_Rodada = ?
+            INNER JOIN dbo.RodadasInventario R
+                ON R.ID_Rodada = RL.ID_Rodada
+                AND R.ID_Inventario = RL.ID_Inventario
+
+            WHERE
+                RL.ID_Inventario = ?
+                AND RL.ID_Rodada = ?
+                AND R.NumeroRodada > 1
+
+            UNION
+
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                ) AS Localizacao
+
+            FROM dbo.InventarioEscopoLocalizacoes E
+
+            INNER JOIN dbo.RodadasInventario R
+                ON R.ID_Rodada = ?
+                AND R.ID_Inventario = E.ID_Inventario
+
+            WHERE
+                E.ID_Inventario = ?
+                AND E.Selecionado = 1
+                AND R.NumeroRodada = 1
+        ) X
         """,
         (
             id_inventario,
-            id_rodada
+            id_rodada,
+            id_rodada,
+            id_inventario
         )
     )
 
@@ -176,11 +208,6 @@ def _buscar_localizacoes_planejadas(
         or
         0
     )
-
-
-# ============================================================
-# LOCALIZAÇÕES CONCLUÍDAS
-# ============================================================
 
 def _buscar_localizacoes_concluidas(
     cursor,
@@ -191,23 +218,80 @@ def _buscar_localizacoes_concluidas(
     cursor.execute(
         """
         SELECT COUNT(
-            DISTINCT UPPER(
-                LTRIM(
-                    RTRIM(Localizacao)
-                )
-            )
+            DISTINCT X.Localizacao
         )
+        FROM
+        (
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(RL.Localizacao)
+                    )
+                ) AS Localizacao
 
-        FROM dbo.RodadaLocalizacoes
+            FROM dbo.RodadaLocalizacoes RL
 
-        WHERE
-            ID_Inventario = ?
-            AND ID_Rodada = ?
-            AND Status = 'CONCLUIDA'
+            INNER JOIN dbo.RodadasInventario R
+                ON R.ID_Rodada = RL.ID_Rodada
+                AND R.ID_Inventario = RL.ID_Inventario
+
+            WHERE
+                RL.ID_Inventario = ?
+                AND RL.ID_Rodada = ?
+                AND R.NumeroRodada > 1
+                AND RL.Status = 'CONCLUIDA'
+
+            UNION
+
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                ) AS Localizacao
+
+            FROM dbo.InventarioEscopoLocalizacoes E
+
+            INNER JOIN dbo.RodadasInventario R
+                ON R.ID_Rodada = ?
+                AND R.ID_Inventario = E.ID_Inventario
+
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    S.Status
+                FROM dbo.SessoesContagem S
+                WHERE
+                    S.ID_Inventario = E.ID_Inventario
+                    AND S.ID_Rodada = R.ID_Rodada
+                    AND S.ValidaParaConsolidacao = 1
+                    AND UPPER(
+                        LTRIM(
+                            RTRIM(S.Localizacao)
+                        )
+                    )
+                    =
+                    UPPER(
+                        LTRIM(
+                            RTRIM(E.Localizacao)
+                        )
+                    )
+                ORDER BY S.ID_Sessao DESC
+            ) UltimaSessao
+
+            WHERE
+                E.ID_Inventario = ?
+                AND E.Selecionado = 1
+                AND R.NumeroRodada = 1
+                AND UltimaSessao.Status IS NOT NULL
+                AND UltimaSessao.Status <> 'ABERTA'
+        ) X
         """,
         (
             id_inventario,
-            id_rodada
+            id_rodada,
+            id_rodada,
+            id_inventario
         )
     )
 
@@ -216,17 +300,6 @@ def _buscar_localizacoes_concluidas(
         or
         0
     )
-
-
-# ============================================================
-# ITENS PLANEJADOS
-#
-# R1:
-# snapshot nas localizações da rodada.
-#
-# R2+:
-# RodadaItens + localização da rodada.
-# ============================================================
 
 def _buscar_itens_planejados(
     cursor,
@@ -240,11 +313,9 @@ def _buscar_itens_planejados(
         cursor.execute(
             """
             SELECT COUNT(*)
-
             FROM
             (
                 SELECT DISTINCT
-
                     UPPER(
                         LTRIM(
                             RTRIM(E.Localizacao)
@@ -264,13 +335,12 @@ def _buscar_itens_planejados(
 
                 FROM dbo.InventarioEstoqueSnapshot E
 
-                INNER JOIN dbo.RodadaLocalizacoes RL
-                    ON RL.ID_Inventario = E.ID_Inventario
-                    AND RL.ID_Rodada = ?
-
+                INNER JOIN dbo.InventarioEscopoLocalizacoes EL
+                    ON EL.ID_Inventario = E.ID_Inventario
+                    AND EL.Selecionado = 1
                     AND UPPER(
                         LTRIM(
-                            RTRIM(RL.Localizacao)
+                            RTRIM(EL.Localizacao)
                         )
                     )
                     =
@@ -282,7 +352,6 @@ def _buscar_itens_planejados(
 
                 WHERE
                     E.ID_Inventario = ?
-
                     AND NULLIF(
                         LTRIM(
                             RTRIM(E.Codigo)
@@ -292,8 +361,7 @@ def _buscar_itens_planejados(
             ) X
             """,
             (
-                id_rodada,
-                id_inventario
+                id_inventario,
             )
         )
 
@@ -410,53 +478,128 @@ def _buscar_itens_processados(
         cursor.execute(
             """
             SELECT COUNT(*)
-
             FROM
             (
                 SELECT DISTINCT
-                    UPPER(LTRIM(RTRIM(E.Localizacao))) AS Localizacao,
-                    LTRIM(RTRIM(E.Codigo)) AS Codigo,
-                    ISNULL(LTRIM(RTRIM(E.Lote)), '') AS Lote
+                    UPPER(
+                        LTRIM(
+                            RTRIM(E.Localizacao)
+                        )
+                    ) AS Localizacao,
+
+                    LTRIM(
+                        RTRIM(E.Codigo)
+                    ) AS Codigo,
+
+                    ISNULL(
+                        LTRIM(
+                            RTRIM(E.Lote)
+                        ),
+                        ''
+                    ) AS Lote
 
                 FROM dbo.InventarioEstoqueSnapshot E
 
-                INNER JOIN dbo.RodadaLocalizacoes RL
-                    ON RL.ID_Inventario = E.ID_Inventario
-                    AND RL.ID_Rodada = ?
-                    AND UPPER(LTRIM(RTRIM(RL.Localizacao)))
-                        = UPPER(LTRIM(RTRIM(E.Localizacao)))
+                INNER JOIN dbo.InventarioEscopoLocalizacoes EL
+                    ON EL.ID_Inventario = E.ID_Inventario
+                    AND EL.Selecionado = 1
+                    AND UPPER(
+                        LTRIM(
+                            RTRIM(EL.Localizacao)
+                        )
+                    )
+                    =
+                    UPPER(
+                        LTRIM(
+                            RTRIM(E.Localizacao)
+                        )
+                    )
 
                 WHERE
                     E.ID_Inventario = ?
-                    AND NULLIF(LTRIM(RTRIM(E.Codigo)), '') IS NOT NULL
+                    AND NULLIF(
+                        LTRIM(
+                            RTRIM(E.Codigo)
+                        ),
+                        ''
+                    ) IS NOT NULL
+
                     AND
                     (
-                        RL.Status = 'CONCLUIDA'
+                        EXISTS
+                        (
+                            SELECT 1
+                            FROM dbo.Contagens C
+
+                            INNER JOIN dbo.SessoesContagem S
+                                ON S.ID_Sessao = C.ID_Sessao
+
+                            WHERE
+                                S.ID_Inventario = E.ID_Inventario
+                                AND S.ID_Rodada = ?
+                                AND S.ValidaParaConsolidacao = 1
+                                AND C.Status = 'ATIVA'
+                                AND UPPER(
+                                    LTRIM(
+                                        RTRIM(S.Localizacao)
+                                    )
+                                )
+                                =
+                                UPPER(
+                                    LTRIM(
+                                        RTRIM(E.Localizacao)
+                                    )
+                                )
+                                AND LTRIM(
+                                    RTRIM(C.Codigo)
+                                )
+                                =
+                                LTRIM(
+                                    RTRIM(E.Codigo)
+                                )
+                                AND ISNULL(
+                                    LTRIM(
+                                        RTRIM(C.Lote)
+                                    ),
+                                    ''
+                                )
+                                =
+                                ISNULL(
+                                    LTRIM(
+                                        RTRIM(E.Lote)
+                                    ),
+                                    ''
+                                )
+                        )
 
                         OR EXISTS
                         (
                             SELECT 1
-                            FROM dbo.Contagens C
-                            INNER JOIN dbo.SessoesContagem S
-                                ON S.ID_Sessao = C.ID_Sessao
+                            FROM dbo.SessoesContagem S
                             WHERE
                                 S.ID_Inventario = E.ID_Inventario
-                                AND S.ID_Rodada = RL.ID_Rodada
+                                AND S.ID_Rodada = ?
                                 AND S.ValidaParaConsolidacao = 1
-                                AND C.Status = 'ATIVA'
-                                AND UPPER(LTRIM(RTRIM(S.Localizacao)))
-                                    = UPPER(LTRIM(RTRIM(E.Localizacao)))
-                                AND LTRIM(RTRIM(C.Codigo))
-                                    = LTRIM(RTRIM(E.Codigo))
-                                AND ISNULL(LTRIM(RTRIM(C.Lote)), '')
-                                    = ISNULL(LTRIM(RTRIM(E.Lote)), '')
+                                AND S.Status <> 'ABERTA'
+                                AND UPPER(
+                                    LTRIM(
+                                        RTRIM(S.Localizacao)
+                                    )
+                                )
+                                =
+                                UPPER(
+                                    LTRIM(
+                                        RTRIM(E.Localizacao)
+                                    )
+                                )
                         )
                     )
             ) X
             """,
             (
+                id_inventario,
                 id_rodada,
-                id_inventario
+                id_rodada
             )
         )
 
@@ -554,13 +697,12 @@ def _buscar_quantidade_planejada(
 
             FROM dbo.InventarioEstoqueSnapshot E
 
-            INNER JOIN dbo.RodadaLocalizacoes RL
-                ON RL.ID_Inventario = E.ID_Inventario
-                AND RL.ID_Rodada = ?
-
+            INNER JOIN dbo.InventarioEscopoLocalizacoes EL
+                ON EL.ID_Inventario = E.ID_Inventario
+                AND EL.Selecionado = 1
                 AND UPPER(
                     LTRIM(
-                        RTRIM(RL.Localizacao)
+                        RTRIM(EL.Localizacao)
                     )
                 )
                 =
@@ -574,8 +716,7 @@ def _buscar_quantidade_planejada(
                 E.ID_Inventario = ?
             """,
             (
-                id_rodada,
-                id_inventario
+                id_inventario,
             )
         )
 
@@ -1089,24 +1230,108 @@ def obter_acompanhamento_localizacoes(
     # Localizações previstas na rodada
     # --------------------------------------------------------
 
-    cursor.execute(
-        """
-        SELECT
-            UPPER(LTRIM(RTRIM(RL.Localizacao))) AS Localizacao,
-            RL.Status
-        FROM dbo.RodadaLocalizacoes RL
-        WHERE
-            RL.ID_Inventario = ?
-            AND RL.ID_Rodada = ?
-            AND NULLIF(LTRIM(RTRIM(RL.Localizacao)), '') IS NOT NULL
-        ORDER BY
-            UPPER(LTRIM(RTRIM(RL.Localizacao)))
-        """,
-        (
-            id_inventario,
-            id_rodada
+    if rodada == 1:
+
+        cursor.execute(
+            """
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                ) AS Localizacao,
+
+                CASE
+                    WHEN UltimaSessao.Status IS NOT NULL
+                         AND UltimaSessao.Status <> 'ABERTA'
+                        THEN 'CONCLUIDA'
+                    ELSE 'PENDENTE'
+                END AS Status
+
+            FROM dbo.InventarioEscopoLocalizacoes E
+
+            OUTER APPLY
+            (
+                SELECT TOP 1
+                    S.Status
+                FROM dbo.SessoesContagem S
+                WHERE
+                    S.ID_Inventario = E.ID_Inventario
+                    AND S.ID_Rodada = ?
+                    AND S.ValidaParaConsolidacao = 1
+                    AND UPPER(
+                        LTRIM(
+                            RTRIM(S.Localizacao)
+                        )
+                    )
+                    =
+                    UPPER(
+                        LTRIM(
+                            RTRIM(E.Localizacao)
+                        )
+                    )
+                ORDER BY S.ID_Sessao DESC
+            ) UltimaSessao
+
+            WHERE
+                E.ID_Inventario = ?
+                AND E.Selecionado = 1
+                AND NULLIF(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    ),
+                    ''
+                ) IS NOT NULL
+
+            ORDER BY
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                )
+            """,
+            (
+                id_rodada,
+                id_inventario
+            )
         )
-    )
+
+    else:
+
+        cursor.execute(
+            """
+            SELECT
+                UPPER(
+                    LTRIM(
+                        RTRIM(RL.Localizacao)
+                    )
+                ) AS Localizacao,
+                RL.Status
+
+            FROM dbo.RodadaLocalizacoes RL
+
+            WHERE
+                RL.ID_Inventario = ?
+                AND RL.ID_Rodada = ?
+                AND NULLIF(
+                    LTRIM(
+                        RTRIM(RL.Localizacao)
+                    ),
+                    ''
+                ) IS NOT NULL
+
+            ORDER BY
+                UPPER(
+                    LTRIM(
+                        RTRIM(RL.Localizacao)
+                    )
+                )
+            """,
+            (
+                id_inventario,
+                id_rodada
+            )
+        )
 
     linhas_localizacoes = cursor.fetchall()
 
@@ -1119,31 +1344,64 @@ def obter_acompanhamento_localizacoes(
         cursor.execute(
             """
             SELECT
-                UPPER(LTRIM(RTRIM(E.Localizacao))) AS Localizacao,
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                ) AS Localizacao,
                 COUNT(*) AS ItensPlanejados
+
             FROM
             (
                 SELECT DISTINCT
                     ID_Inventario,
                     Localizacao,
-                    LTRIM(RTRIM(Codigo)) AS Codigo,
-                    ISNULL(LTRIM(RTRIM(Lote)), '') AS Lote
+                    LTRIM(
+                        RTRIM(Codigo)
+                    ) AS Codigo,
+                    ISNULL(
+                        LTRIM(
+                            RTRIM(Lote)
+                        ),
+                        ''
+                    ) AS Lote
+
                 FROM dbo.InventarioEstoqueSnapshot
+
                 WHERE
                     ID_Inventario = ?
-                    AND NULLIF(LTRIM(RTRIM(Codigo)), '') IS NOT NULL
+                    AND NULLIF(
+                        LTRIM(
+                            RTRIM(Codigo)
+                        ),
+                        ''
+                    ) IS NOT NULL
             ) E
-            INNER JOIN dbo.RodadaLocalizacoes RL
-                ON RL.ID_Inventario = E.ID_Inventario
-                AND RL.ID_Rodada = ?
-                AND UPPER(LTRIM(RTRIM(RL.Localizacao)))
-                    = UPPER(LTRIM(RTRIM(E.Localizacao)))
+
+            INNER JOIN dbo.InventarioEscopoLocalizacoes EL
+                ON EL.ID_Inventario = E.ID_Inventario
+                AND EL.Selecionado = 1
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(EL.Localizacao)
+                    )
+                )
+                =
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                )
+
             GROUP BY
-                UPPER(LTRIM(RTRIM(E.Localizacao)))
+                UPPER(
+                    LTRIM(
+                        RTRIM(E.Localizacao)
+                    )
+                )
             """,
             (
                 id_inventario,
-                id_rodada
             )
         )
 

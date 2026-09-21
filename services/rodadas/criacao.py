@@ -17,9 +17,9 @@ IMPORTANTE:
 
 from domain.exceptions import BusinessRuleViolation, ConflictError
 
-from services.configuracoes_inventario import (
-    obter_configuracao_inventario,
-    obter_tipo_proxima_rodada_configurada,
+from services.configuracoes_inventario_aplicadas import (
+    obter_configuracao_aplicada,
+    obter_tipo_proxima_rodada_aplicada,
 )
 
 from services.analise_gestor import (
@@ -33,6 +33,7 @@ from services.rodadas.itens import (
 from services.rodadas.localizacoes import (
     _inserir_rodada_localizacao,
     sincronizar_localizacoes_recontagem,
+    rodada_operacional_concluida,
 )
 
 from services.rodadas.candidatos_rotativo import (
@@ -41,6 +42,7 @@ from services.rodadas.candidatos_rotativo import (
 )
 
 from services.rodadas.candidatos_oficial import (
+    _buscar_candidatos_r2_oficial,
     _buscar_candidatos_r3,
     _buscar_candidatos_recontagem_anterior,
 )
@@ -138,10 +140,9 @@ def _carregar_configuracao_criacao(
 ):
 
     configuracao = (
-        obter_configuracao_inventario(
+        obter_configuracao_aplicada(
             cursor=cursor,
-            cliente_id=inventario.ClienteId,
-            tipo_inventario=inventario.Tipo
+            id_inventario=inventario.ID_Inventario
         )
     )
 
@@ -183,10 +184,9 @@ def _carregar_configuracao_criacao(
         )
 
     tipo_proxima = (
-        obter_tipo_proxima_rodada_configurada(
+        obter_tipo_proxima_rodada_aplicada(
             cursor=cursor,
-            cliente_id=inventario.ClienteId,
-            tipo_inventario=inventario.Tipo,
+            id_inventario=inventario.ID_Inventario,
             numero_rodada_atual=numero_atual
         )
     )
@@ -400,6 +400,45 @@ def _selecionar_candidatos(
         )
 
     elif (
+        _normalizar_texto(
+            inventario.Tipo
+        ).upper() == "OFICIAL"
+        and
+        rodadas_iniciais == 1
+        and
+        numero_proxima == 2
+        and
+        tipo_proxima == "DIVERGENCIAS"
+    ):
+
+        if not rodada_operacional_concluida(
+            cursor=cursor,
+            id_rodada=rodada_atual.ID_Rodada
+        ):
+            raise BusinessRuleViolation(
+                "A primeira rodada ainda possui "
+                "localizações pendentes de contagem. "
+                "Conclua todas as localizações antes "
+                "de gerar a R2."
+            )
+
+        candidatos = (
+            _buscar_candidatos_r2_oficial(
+                cursor=cursor,
+                id_inventario=(
+                    inventario.ID_Inventario
+                ),
+                id_rodada_origem=(
+                    rodada_atual.ID_Rodada
+                )
+            )
+        )
+
+        origem_candidatos = (
+            "DIVERGENCIAS_R1_OFICIAL"
+        )
+
+    elif (
         numero_proxima == (
             rodadas_iniciais + 1
         )
@@ -569,6 +608,24 @@ def _selecionar_candidatos(
         )
 
     elif tipo_proxima == "COMPLETA":
+
+        if (
+            _normalizar_texto(
+                inventario.Tipo
+            ) == "OFICIAL"
+            and
+            not rodada_operacional_concluida(
+                cursor=cursor,
+                id_rodada=rodada_atual.ID_Rodada
+            )
+        ):
+
+            raise BusinessRuleViolation(
+                "A rodada atual ainda possui "
+                "localiza??es pendentes de contagem. "
+                "Conclua a rodada antes de gerar "
+                "a pr?xima rodada."
+            )
 
         candidatos = []
 

@@ -17,9 +17,13 @@ IMPORTANTE:
   detectado durante a análise estática da Fase 5.
 """
 
-from services.configuracoes_inventario import (
-    obter_configuracao_inventario,
-    obter_tipo_proxima_rodada_configurada,
+from services.configuracoes_inventario_aplicadas import (
+    obter_configuracao_aplicada,
+    obter_tipo_proxima_rodada_aplicada,
+)
+
+from services.rodadas.localizacoes import (
+    rodada_operacional_concluida,
 )
 
 from services.analise_recontagem import (
@@ -36,6 +40,7 @@ from services.rodadas.candidatos_rotativo import (
 )
 
 from services.rodadas.candidatos_oficial import (
+    _buscar_candidatos_r2_oficial,
     _buscar_candidatos_r3,
 )
 
@@ -131,10 +136,9 @@ def visualizar_proxima_rodada(
     # ========================================================
 
     configuracao = (
-        obter_configuracao_inventario(
+        obter_configuracao_aplicada(
             cursor=cursor,
-            cliente_id=inventario.ClienteId,
-            tipo_inventario=inventario.Tipo
+            id_inventario=inventario.ID_Inventario
         )
     )
 
@@ -196,10 +200,9 @@ def visualizar_proxima_rodada(
     # ========================================================
 
     tipo_proxima = (
-        obter_tipo_proxima_rodada_configurada(
+        obter_tipo_proxima_rodada_aplicada(
             cursor=cursor,
-            cliente_id=inventario.ClienteId,
-            tipo_inventario=inventario.Tipo,
+            id_inventario=inventario.ID_Inventario,
             numero_rodada_atual=numero_atual
         )
     )
@@ -380,6 +383,50 @@ def visualizar_proxima_rodada(
     # ========================================================
 
     elif (
+        tipo_inventario == "OFICIAL"
+        and
+        rodadas_iniciais == 1
+        and
+        numero_proxima == 2
+        and
+        tipo_proxima == "DIVERGENCIAS"
+    ):
+
+        if not rodada_operacional_concluida(
+            cursor=cursor,
+            id_rodada=rodada_atual.ID_Rodada
+        ):
+            return {
+                "pode_criar": False,
+                "motivo":
+                    "RODADA_OPERACIONAL_NAO_CONCLUIDA",
+                "numero_rodada_atual":
+                    numero_atual,
+                "numero_proxima_rodada":
+                    numero_proxima,
+                "tipo_proxima_rodada":
+                    tipo_proxima,
+                "candidatos": 0,
+                "pode_encaminhar_gestor": False,
+            }
+
+        candidatos = (
+            _buscar_candidatos_r2_oficial(
+                cursor=cursor,
+                id_inventario=(
+                    inventario.ID_Inventario
+                ),
+                id_rodada_origem=(
+                    rodada_atual.ID_Rodada
+                )
+            )
+        )
+
+        origem_candidatos = (
+            "DIVERGENCIAS_R1_OFICIAL"
+        )
+
+    elif (
         numero_proxima == (
             rodadas_iniciais + 1
         )
@@ -550,6 +597,41 @@ def visualizar_proxima_rodada(
     # ========================================================
 
     elif tipo_proxima == "COMPLETA":
+
+        if (
+            tipo_inventario == "OFICIAL"
+            and
+            not rodada_operacional_concluida(
+                cursor=cursor,
+                id_rodada=rodada_atual.ID_Rodada
+            )
+        ):
+
+            return {
+                "pode_criar":
+                    False,
+
+                "motivo":
+                    "RODADA_OPERACIONAL_NAO_CONCLUIDA",
+
+                "numero_rodada_atual":
+                    numero_atual,
+
+                "numero_proxima_rodada":
+                    numero_proxima,
+
+                "tipo_proxima_rodada":
+                    tipo_proxima,
+
+                "origem_candidatos":
+                    "ESCOPO_COMPLETO",
+
+                "candidatos":
+                    0,
+
+                "pode_encaminhar_gestor":
+                    False
+            }
 
         origem_candidatos = (
             "ESCOPO_COMPLETO"

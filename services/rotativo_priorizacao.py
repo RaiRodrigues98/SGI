@@ -818,15 +818,10 @@ def _montar_motivos(
 # DEFINIR TIPO DE SUGESTÃO
 # ============================================================
 
-def _definir_tipo_sugestao(
+def _eh_risco_prioritario(
     item,
     limite_score_sugestao
 ):
-
-    if not item[
-        "elegivel_sugestao"
-    ]:
-        return None
 
     tendencia = (
         item.get(
@@ -842,25 +837,45 @@ def _definir_tipo_sugestao(
         )
     )
 
-    # Tendência crítica/recorrente caracteriza sugestão
-    # por risco mesmo que o score ainda esteja abaixo do
-    # limite numérico configurado.
     if classificacao_tendencia in (
         "DETERIORANDO",
         "RECORRENTE",
     ):
-        return "RISCO"
+        return True
 
-    if (
-        item[
-            "score_risco"
-        ]
+    return (
+        float(
+            item.get(
+                "score_risco",
+                0
+            )
+            or 0
+        )
         >=
         limite_score_sugestao
+    )
+
+
+def _definir_tipo_sugestao(
+    item,
+    limite_score_sugestao
+):
+
+    if not item[
+        "elegivel_sugestao"
+    ]:
+        return None
+
+    if _eh_risco_prioritario(
+        item=item,
+        limite_score_sugestao=(
+            limite_score_sugestao
+        ),
     ):
         return "RISCO"
 
     return "COBERTURA_CICLO"
+
 
 
 # ============================================================
@@ -868,7 +883,10 @@ def _definir_tipo_sugestao(
 # ============================================================
 
 def _chave_prioridade(
-    item
+    item,
+    limite_score_sugestao=(
+        LIMITE_SUGESTAO_PADRAO
+    )
 ):
 
     nunca_contada = (
@@ -876,6 +894,15 @@ def _chave_prioridade(
             "ultima_contagem"
         ]
         is None
+    )
+
+    risco_prioritario = (
+        _eh_risco_prioritario(
+            item=item,
+            limite_score_sugestao=(
+                limite_score_sugestao
+            ),
+        )
     )
 
     dias_sem_contagem = (
@@ -903,25 +930,24 @@ def _chave_prioridade(
         ]
     )
 
-    # --------------------------------------------------------
-    # Ordem:
-    #
-    # 1. Nunca contada
-    # 2. Maior score
-    # 3. Mais dias sem contagem
-    # 4. Maior taxa de divergência
-    # 5. Mais divergências consecutivas
-    # 6. Localização
-    # --------------------------------------------------------
+    if risco_prioritario:
+        grupo = 0
+
+    elif nunca_contada:
+        grupo = 1
+
+    else:
+        grupo = 2
 
     return (
-        0
-        if nunca_contada
-        else 1,
+        grupo,
 
-        -item[
-            "score_risco"
-        ],
+        -float(
+            item[
+                "score_risco"
+            ]
+            or 0
+        ),
 
         -dias_sem_contagem,
 
@@ -933,6 +959,7 @@ def _chave_prioridade(
             "localizacao"
         ],
     )
+
 
 
 # ============================================================
@@ -1271,7 +1298,14 @@ def recalcular_priorizacao_rotativo(
     ]
 
     candidatos.sort(
-        key=_chave_prioridade
+        key=lambda item: (
+            _chave_prioridade(
+                item=item,
+                limite_score_sugestao=(
+                    limite_score_sugestao
+                ),
+            )
+        )
     )
 
     # ========================================================
@@ -1639,7 +1673,7 @@ def recalcular_priorizacao_rotativo(
 
         "modelo": {
             "versao":
-                "1.3",
+                "1.4",
 
             "estrategia":
                 "RISCO_COBERTURA_E_TENDENCIA_INTEGRADA",

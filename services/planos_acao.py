@@ -881,7 +881,10 @@ def listar_ocorrencias_tratativas(
             "PageSize deve estar entre 1 e 100."
         )
 
-    filtros = []
+    # Tratativas pertencem exclusivamente ao inventario ROTATIVO.
+    filtros = [
+        "UPPER(LTRIM(RTRIM(O.TipoInventario))) = 'ROTATIVO'"
+    ]
     parametros = []
 
     if cliente_id is not None:

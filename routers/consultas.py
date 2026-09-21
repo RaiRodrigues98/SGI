@@ -14,6 +14,7 @@ from dependencies.auth import (
 
 from services.consultas_operacionais import (
     listar_inventarios,
+    listar_inventarios_central,
     consultar_inventario,
     consultar_rodada_atual,
     consultar_localizacoes_inventario,
@@ -91,6 +92,57 @@ def listar(
         if cursor:
             cursor.close()
 
+        if conn:
+            conn.close()
+
+
+# ROTA_CENTRAL_PAGINADA_SGI_V1
+@router.get(
+    "/inventarios/central",
+    dependencies=[Depends(exigir_permissao("INVENTARIO_VISUALIZAR"))],
+)
+def central_inventarios(
+    pagina: int = 1,
+    por_pagina: int = 25,
+    pesquisa: str | None = None,
+    tipo: str | None = None,
+    status: str | None = None,
+    cliente_id: int | None = None,
+    fase: str | None = "ATIVAS",
+    pendencias: str | None = "TODAS",
+    periodo: str | None = "QUALQUER",
+    data_inicial: str | None = None,
+    data_final: str | None = None,
+):
+    if pagina <= 0 or por_pagina not in {25, 50, 100}:
+        raise HTTPException(status_code=400, detail="Paginação inválida.")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        return listar_inventarios_central(
+            cursor=cursor,
+            pagina=pagina,
+            por_pagina=por_pagina,
+            pesquisa=pesquisa,
+            tipo=tipo,
+            status=status,
+            cliente_id=cliente_id,
+            fase=fase,
+            pendencias=pendencias,
+            periodo=periodo,
+            data_inicial=data_inicial,
+            data_final=data_final,
+        )
+    except HTTPException:
+        raise
+    except Exception as erro:
+        raise HTTPException(status_code=500, detail=str(erro))
+    finally:
+        if cursor:
+            cursor.close()
         if conn:
             conn.close()
 

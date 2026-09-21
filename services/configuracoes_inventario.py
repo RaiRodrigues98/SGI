@@ -1,5 +1,11 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
 
+from services.configuracoes_inventario_aplicadas import (
+    obter_configuracao_aplicada,
+    obter_configuracao_completa_aplicada,
+)
+
+
 
 # ============================================================
 # CONFIGURAÇÕES DO INVENTÁRIO
@@ -65,6 +71,7 @@ def obter_configuracao_inventario(
             ValidarLocalizacaoEscopo,
             PermitirLocalizacaoVazia,
             PermitirReaberturaLocalizacao,
+            PermitirAlteracaoEscopoAposSnapshot,
 
             CodigoLivre,
             PermitirCodigoNaoCadastrado,
@@ -143,6 +150,11 @@ def obter_configuracao_inventario(
     bool(
         linha.PermitirReaberturaLocalizacao
     ),
+
+        "permitir_alteracao_escopo_apos_snapshot":
+            bool(
+                linha.PermitirAlteracaoEscopoAposSnapshot
+            ),
 
         "codigo_livre":
             bool(
@@ -251,41 +263,11 @@ def obter_configuracao_por_inventario(
     cursor,
     id_inventario: int
 ):
-
-    cursor.execute(
-        """
-        SELECT
-            ID_Inventario,
-            ClienteId,
-            Tipo
-
-        FROM dbo.Inventarios
-
-        WHERE ID_Inventario = ?
-        """,
-        id_inventario
-    )
-
-    inventario = cursor.fetchone()
-
-    if not inventario:
-
-        raise NotFoundError(
-            "Inventário não encontrado."
-        )
-
-    if inventario.ClienteId is None:
-
-        raise BusinessRuleViolation(
-            "O inventário não possui ClienteId "
-                "configurado."
-        )
-
-    return obter_configuracao_inventario(
+    return obter_configuracao_aplicada(
         cursor=cursor,
-        cliente_id=inventario.ClienteId,
-        tipo_inventario=inventario.Tipo
+        id_inventario=id_inventario
     )
+
 
 
 # ============================================================
@@ -391,28 +373,11 @@ def obter_configuracao_completa_por_inventario(
     cursor,
     id_inventario: int
 ):
-
-    configuracao = (
-        obter_configuracao_por_inventario(
-            cursor=cursor,
-            id_inventario=id_inventario
-        )
+    return obter_configuracao_completa_aplicada(
+        cursor=cursor,
+        id_inventario=id_inventario
     )
 
-    configuracao[
-        "rodadas"
-    ] = (
-        obter_rodadas_configuradas(
-            cursor=cursor,
-            id_configuracao=(
-                configuracao[
-                    "id_configuracao"
-                ]
-            )
-        )
-    )
-
-    return configuracao
 
 
 # ============================================================

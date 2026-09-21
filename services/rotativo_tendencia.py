@@ -119,12 +119,23 @@ def _buscar_localizacoes_ciclo(
         """
         SELECT
             ID_CicloLocalizacao,
+            ID_Ciclo,
             ID_RotativoLocalizacao,
+            ClienteId,
+            cArmazem,
             Localizacao,
             Status,
-            Prioridade,
+            DataInclusao,
+            DataInicioContagem,
+            DataConclusao,
+            ID_Inventario,
+            ID_Rodada,
             ScoreRiscoEntrada,
             ClassificacaoRiscoEntrada,
+            Sugerida,
+            Prioridade,
+            UsuarioContagem,
+            DataHoraAtualizacao,
             TipoSugestao
 
         FROM dbo.CicloRotativoLocalizacoes
@@ -145,6 +156,477 @@ def _buscar_localizacoes_ciclo(
     )
 
     return cursor.fetchall()
+
+
+# ============================================================
+# CARGAS EM LOTE PARA O CONTEXTO ROTATIVO
+# ============================================================
+
+def _buscar_ciclo_contexto_por_id(
+    cursor,
+    id_ciclo: int
+):
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Ciclo,
+            CodigoCiclo,
+            ClienteId,
+            cArmazem,
+            DataInicio,
+            DataFimPrevista,
+            DataFimReal,
+            Status,
+            TotalLocalizacoes,
+            LocalizacoesContadas,
+            PercentualCobertura,
+            CriadoPor,
+            DataHoraCriacao,
+            FinalizadoPor
+
+        FROM dbo.CiclosRotativo
+
+        WHERE
+            ID_Ciclo = ?
+        """,
+        (
+            id_ciclo,
+        )
+    )
+
+    return cursor.fetchone()
+
+
+def _buscar_cadastros_ciclo_em_lote(
+    cursor,
+    id_ciclo: int
+):
+
+    cursor.execute(
+        """
+        SELECT
+            rl.ID_RotativoLocalizacao,
+            rl.ClienteId,
+            rl.cArmazem,
+            rl.Localizacao,
+            rl.Status,
+            rl.UltimaContagem,
+            rl.ID_InventarioUltimaContagem,
+            rl.ID_RodadaUltimaContagem,
+            rl.ScoreRisco,
+            rl.ClassificacaoRisco,
+            rl.Sugerida,
+            rl.Prioridade,
+            rl.TipoSugestao,
+            rl.DataHoraCriacao,
+            rl.DataHoraAtualizacao
+
+        FROM dbo.RotativoLocalizacoes rl
+
+        INNER JOIN dbo.CicloRotativoLocalizacoes crl
+            ON crl.ID_RotativoLocalizacao =
+               rl.ID_RotativoLocalizacao
+
+        WHERE
+            crl.ID_Ciclo = ?
+        """,
+        (
+            id_ciclo,
+        )
+    )
+
+    return cursor.fetchall()
+
+
+def _buscar_historico_ciclo_em_lote(
+    cursor,
+    id_ciclo: int,
+    limite_historico: int
+):
+
+    limite = int(
+        limite_historico
+    )
+
+    sql = f"""
+        WITH HistoricoRankeado AS (
+            SELECT
+                rh.ID_HistoricoRotativo,
+                rh.ID_RotativoLocalizacao,
+                rh.ClienteId,
+                rh.cArmazem,
+                rh.Localizacao,
+                rh.ID_Inventario,
+                rh.ID_Rodada,
+                rh.DataHoraInicio,
+                rh.DataHoraFim,
+                rh.DataHoraContagem,
+                rh.Usuario,
+                rh.LocalizacaoVazia,
+                rh.PossuiDivergencia,
+                rh.QuantidadeItens,
+                rh.QuantidadeItensOK,
+                rh.QuantidadeItensDivergentes,
+                rh.ScoreRiscoNaData,
+                rh.ClassificacaoRiscoNaData,
+                rh.DataHoraRegistro,
+                rh.ID_Ciclo,
+
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        rh.ID_RotativoLocalizacao
+
+                    ORDER BY
+                        rh.DataHoraContagem DESC,
+                        rh.ID_HistoricoRotativo DESC
+                ) AS RN
+
+            FROM dbo.RotativoHistoricoLocalizacoes rh
+
+            INNER JOIN dbo.CicloRotativoLocalizacoes crl
+                ON crl.ID_RotativoLocalizacao =
+                   rh.ID_RotativoLocalizacao
+
+            WHERE
+                crl.ID_Ciclo = ?
+        )
+
+        SELECT
+            ID_HistoricoRotativo,
+            ID_RotativoLocalizacao,
+            ClienteId,
+            cArmazem,
+            Localizacao,
+            ID_Inventario,
+            ID_Rodada,
+            DataHoraInicio,
+            DataHoraFim,
+            DataHoraContagem,
+            Usuario,
+            LocalizacaoVazia,
+            PossuiDivergencia,
+            QuantidadeItens,
+            QuantidadeItensOK,
+            QuantidadeItensDivergentes,
+            ScoreRiscoNaData,
+            ClassificacaoRiscoNaData,
+            DataHoraRegistro,
+            ID_Ciclo
+
+        FROM HistoricoRankeado
+
+        WHERE
+            RN <= {limite}
+
+        ORDER BY
+            ID_RotativoLocalizacao,
+            DataHoraContagem DESC,
+            ID_HistoricoRotativo DESC
+    """
+
+    cursor.execute(
+        sql,
+        (
+            id_ciclo,
+        )
+    )
+
+    return cursor.fetchall()
+
+
+def _buscar_ocorrencias_ciclo_em_lote(
+    cursor,
+    id_ciclo: int,
+    cliente_id: int
+):
+
+    cursor.execute(
+        """
+        WITH LocalizacoesCiclo AS (
+            SELECT DISTINCT
+                UPPER(
+                    LTRIM(
+                        RTRIM(Localizacao)
+                    )
+                ) AS Localizacao
+
+            FROM dbo.CicloRotativoLocalizacoes
+
+            WHERE
+                ID_Ciclo = ?
+        )
+
+        SELECT
+            od.ID_Ocorrencia,
+            od.ClienteId,
+            od.ID_Inventario,
+            od.ID_Rodada,
+            od.TipoInventario,
+            od.Localizacao,
+            od.Codigo,
+            od.Lote,
+            od.QtdEstoque,
+            od.QtdContada,
+            od.Diferenca,
+            od.TipoDivergencia,
+            od.StatusResolucao,
+            od.Justificativa,
+            od.ID_DecisaoRotativo,
+            od.ID_InventarioResolucao,
+            od.ID_RodadaResolucao,
+            od.TipoResolucao,
+            od.ObservacaoResolucao,
+            od.CriadoPor,
+            od.DataHoraCriacao,
+            od.ResolvidoPor,
+            od.DataHoraResolucao
+
+        FROM dbo.OcorrenciasDivergencia od
+
+        INNER JOIN LocalizacoesCiclo lc
+            ON lc.Localizacao =
+               UPPER(
+                   LTRIM(
+                       RTRIM(
+                           od.Localizacao
+                       )
+                   )
+               )
+
+        WHERE
+            od.ClienteId = ?
+
+            AND UPPER(
+                LTRIM(
+                    RTRIM(
+                        od.TipoInventario
+                    )
+                )
+            ) = 'ROTATIVO'
+
+        ORDER BY
+            UPPER(
+                LTRIM(
+                    RTRIM(
+                        od.Localizacao
+                    )
+                )
+            ),
+            od.DataHoraCriacao DESC,
+            od.ID_Ocorrencia DESC
+        """,
+        (
+            id_ciclo,
+            cliente_id,
+        )
+    )
+
+    return cursor.fetchall()
+
+
+# ============================================================
+# EVIDENCIAS DE EFICACIA EM LOTE
+#
+# Reproduz as duas consultas executadas atualmente por
+# _avaliar_eficacia:
+#
+# 1. primeira nova ocorrencia da mesma chave apos resolucao;
+# 2. primeira contagem da localizacao apos resolucao.
+# ============================================================
+
+def _buscar_evidencias_eficacia_em_lote(
+    cursor,
+    id_ciclo: int,
+    cliente_id: int
+):
+
+    cursor.execute(
+        """
+        WITH LocalizacoesCiclo AS (
+            SELECT DISTINCT
+                crl.ID_RotativoLocalizacao,
+
+                UPPER(
+                    LTRIM(
+                        RTRIM(
+                            crl.Localizacao
+                        )
+                    )
+                ) AS Localizacao
+
+            FROM dbo.CicloRotativoLocalizacoes crl
+
+            WHERE
+                crl.ID_Ciclo = ?
+        ),
+
+        OcorrenciasBase AS (
+            SELECT
+                od.ID_Ocorrencia,
+                od.ClienteId,
+                lc.ID_RotativoLocalizacao,
+                od.DataHoraResolucao,
+
+                UPPER(
+                    LTRIM(
+                        RTRIM(
+                            od.Localizacao
+                        )
+                    )
+                ) AS Localizacao,
+
+                UPPER(
+                    LTRIM(
+                        RTRIM(
+                            od.Codigo
+                        )
+                    )
+                ) AS Codigo,
+
+                UPPER(
+                    LTRIM(
+                        RTRIM(
+                            ISNULL(
+                                od.Lote,
+                                ''
+                            )
+                        )
+                    )
+                ) AS Lote
+
+            FROM dbo.OcorrenciasDivergencia od
+
+            INNER JOIN LocalizacoesCiclo lc
+                ON lc.Localizacao =
+                   UPPER(
+                       LTRIM(
+                           RTRIM(
+                               od.Localizacao
+                           )
+                       )
+                   )
+
+            WHERE
+                od.ClienteId = ?
+
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(
+                            od.TipoInventario
+                        )
+                    )
+                ) = 'ROTATIVO'
+
+                AND od.DataHoraResolucao IS NOT NULL
+        )
+
+        SELECT
+            base.ID_Ocorrencia,
+
+            nova.ID_Ocorrencia
+                AS NovaOcorrenciaID,
+
+            nova.DataHoraCriacao
+                AS DataNovaOcorrencia,
+
+            posterior.ID_HistoricoRotativo
+                AS IDHistoricoValidacao,
+
+            posterior.DataHoraContagem
+                AS DataHistoricoValidacao,
+
+            posterior.PossuiDivergencia
+                AS PossuiDivergenciaPosterior
+
+        FROM OcorrenciasBase base
+
+        OUTER APPLY (
+            SELECT TOP 1
+                nova_od.ID_Ocorrencia,
+                nova_od.DataHoraCriacao
+
+            FROM dbo.OcorrenciasDivergencia nova_od
+
+            WHERE
+                nova_od.ClienteId =
+                    base.ClienteId
+
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(
+                            nova_od.TipoInventario
+                        )
+                    )
+                ) = 'ROTATIVO'
+
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(
+                            nova_od.Localizacao
+                        )
+                    )
+                ) = base.Localizacao
+
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(
+                            nova_od.Codigo
+                        )
+                    )
+                ) = base.Codigo
+
+                AND UPPER(
+                    LTRIM(
+                        RTRIM(
+                            ISNULL(
+                                nova_od.Lote,
+                                ''
+                            )
+                        )
+                    )
+                ) = base.Lote
+
+                AND nova_od.DataHoraCriacao >
+                    base.DataHoraResolucao
+
+            ORDER BY
+                nova_od.DataHoraCriacao ASC,
+                nova_od.ID_Ocorrencia ASC
+        ) nova
+
+        OUTER APPLY (
+            SELECT TOP 1
+                rh.ID_HistoricoRotativo,
+                rh.DataHoraContagem,
+                rh.PossuiDivergencia
+
+            FROM dbo.RotativoHistoricoLocalizacoes rh
+
+            WHERE
+                rh.ID_RotativoLocalizacao =
+                    base.ID_RotativoLocalizacao
+
+                AND rh.DataHoraContagem >
+                    base.DataHoraResolucao
+
+            ORDER BY
+                rh.DataHoraContagem ASC,
+                rh.ID_HistoricoRotativo ASC
+        ) posterior
+
+        ORDER BY
+            base.ID_Ocorrencia
+        """,
+        (
+            id_ciclo,
+            cliente_id,
+        )
+    )
+
+    return cursor.fetchall()
+
+
 
 
 # ============================================================
@@ -1264,13 +1746,125 @@ def consultar_tendencias_rotativo(
         )
     )
 
+    ciclo_contexto = (
+        _buscar_ciclo_contexto_por_id(
+            cursor=cursor,
+            id_ciclo=ciclo.ID_Ciclo,
+        )
+    )
+
+    if not ciclo_contexto:
+        raise BusinessRuleViolation(
+            "Ciclo rotativo n\u00e3o encontrado para montagem do contexto."
+        )
+
+    cadastros_db = (
+        _buscar_cadastros_ciclo_em_lote(
+            cursor=cursor,
+            id_ciclo=ciclo.ID_Ciclo,
+        )
+    )
+
+    historicos_db = (
+        _buscar_historico_ciclo_em_lote(
+            cursor=cursor,
+            id_ciclo=ciclo.ID_Ciclo,
+            limite_historico=(
+                limite_historico
+            ),
+        )
+    )
+
+    ocorrencias_db = (
+        _buscar_ocorrencias_ciclo_em_lote(
+            cursor=cursor,
+            id_ciclo=ciclo.ID_Ciclo,
+            cliente_id=cliente_id,
+        )
+    )
+
+    evidencias_eficacia_db = (
+        _buscar_evidencias_eficacia_em_lote(
+            cursor=cursor,
+            id_ciclo=ciclo.ID_Ciclo,
+            cliente_id=cliente_id,
+        )
+    )
+
+    eficacia_por_ocorrencia = {
+        int(
+            item.ID_Ocorrencia
+        ): item
+        for item in evidencias_eficacia_db
+    }
+
+    cadastros_por_id = {
+        int(
+            item.ID_RotativoLocalizacao
+        ): item
+        for item in cadastros_db
+    }
+
+    historicos_por_id = {}
+
+    for item_historico in historicos_db:
+
+        chave_historico = int(
+            item_historico.ID_RotativoLocalizacao
+        )
+
+        historicos_por_id.setdefault(
+            chave_historico,
+            []
+        ).append(
+            item_historico
+        )
+
+    ocorrencias_por_localizacao = {}
+
+    for item_ocorrencia in ocorrencias_db:
+
+        chave_ocorrencia = _normalizar(
+            item_ocorrencia.Localizacao
+        )
+
+        ocorrencias_por_localizacao.setdefault(
+            chave_ocorrencia,
+            []
+        ).append(
+            item_ocorrencia
+        )
+
     tendencias = []
 
     # ========================================================
-    # ANALISAR CADA LOCALIZAÇÃO
+    # ANALISAR CADA LOCALIZACAO
+    #
+    # Os dados base ja foram carregados em lote.
+    # A eficacia continua usando a regra SQL original.
     # ========================================================
 
     for linha in localizacoes:
+
+        id_rotativo_localizacao = int(
+            linha.ID_RotativoLocalizacao
+        )
+
+        chave_localizacao = _normalizar(
+            linha.Localizacao
+        )
+
+        cadastro_precarregado = (
+            cadastros_por_id.get(
+                id_rotativo_localizacao
+            )
+        )
+
+        if cadastro_precarregado is None:
+            raise BusinessRuleViolation(
+                "Localiza\u00e7\u00e3o do ciclo n\u00e3o encontrada em "
+                "RotativoLocalizacoes."
+            )
 
         contexto = (
             montar_contexto_localizacao_rotativo(
@@ -1279,6 +1873,31 @@ def consultar_tendencias_rotativo(
                 armazem=armazem,
                 localizacao=linha.Localizacao,
                 limite_historico=limite_historico,
+                dados_precarregados={
+                    "cadastro":
+                        cadastro_precarregado,
+
+                    "ciclo":
+                        ciclo_contexto,
+
+                    "ciclo_localizacao":
+                        linha,
+
+                    "historico_db":
+                        historicos_por_id.get(
+                            id_rotativo_localizacao,
+                            []
+                        ),
+
+                    "ocorrencias_db":
+                        ocorrencias_por_localizacao.get(
+                            chave_localizacao,
+                            []
+                        ),
+
+                    "eficacia_por_ocorrencia":
+                        eficacia_por_ocorrencia,
+                },
             )
         )
 

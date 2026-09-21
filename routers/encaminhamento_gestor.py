@@ -16,6 +16,10 @@ from services.encaminhamento_gestor import (
 )
 
 
+from services.notificacoes import (
+    criar_por_permissao,
+)
+
 router = APIRouter(
     tags=["Gestor"]
 )
@@ -74,6 +78,53 @@ def encaminhar_gestor(
                 usuario=usuario
             )
         )
+
+        if not resultado.get("ja_encaminhado", False):
+            id_rodada = int(
+                resultado.get("id_rodada") or 0
+            )
+
+            codigo_inventario = str(
+                resultado.get("codigo_inventario")
+                or id_inventario
+            )
+
+            total_pendentes = int(
+                resultado.get("total_itens_pendentes")
+                or 0
+            )
+
+            resumo_notificacoes = criar_por_permissao(
+                cursor=cursor,
+                codigo_permissao="GESTOR_DECIDIR",
+                id_usuario_ator=int(
+                    usuario_atual["id_usuario"]
+                ),
+                tipo="GESTOR_ANALISE_SOLICITADA",
+                titulo="Invent\u00e1rio aguardando decis\u00e3o",
+                mensagem=(
+                    f"O invent\u00e1rio {codigo_inventario} "
+                    f"foi encaminhado ao gestor com "
+                    f"{total_pendentes} item(ns) pendente(s)."
+                ),
+                prioridade="CRITICA",
+                entidade_tipo="INVENTARIO",
+                entidade_id=id_inventario,
+                id_inventario=id_inventario,
+                url=f"/inventarios/{id_inventario}",
+                chave_dedupe=(
+                    "GESTOR_ANALISE_SOLICITADA:"
+                    f"{id_inventario}:{id_rodada}"
+                ),
+                excluir_ator=False,
+            )
+
+            resultado["notificacoes"] = resumo_notificacoes
+        else:
+            resultado["notificacoes"] = {
+                "destinatarios_localizados": 0,
+                "notificacoes_criadas": 0,
+            }
 
         # ====================================================
         # O SERVICE NÃO REALIZA COMMIT
