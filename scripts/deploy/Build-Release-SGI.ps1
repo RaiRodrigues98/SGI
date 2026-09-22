@@ -135,6 +135,7 @@ if ($Problemas) {
 $Obrigatorios = @(
     "Dockerfile.backend",
     "docker-compose.yml",
+    "docker-compose.test.yml",
     "deploy\nginx.conf",
     "requirements.txt",
     "frontend\Dockerfile",

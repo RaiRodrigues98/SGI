@@ -1,0 +1,12 @@
+services:
+  backend:
+    container_name: sgi_test_backend
+    restart: "no"
+    environment:
+      FRONTEND_URL: http://27.78.101.5:3101
+  frontend:
+    container_name: sgi_test_frontend
+    restart: "no"
+  gateway:
+    container_name: sgi_test_gateway
+    restart: "no"

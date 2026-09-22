@@ -113,6 +113,7 @@ Write-Host "[5/6] Infraestrutura de producao" -ForegroundColor Cyan
 $Obrigatorios = @(
     "Dockerfile.backend",
     "docker-compose.yml",
+    "docker-compose.test.yml",
     ".dockerignore",
     ".env.production.example",
     "deploy\nginx.conf",
