@@ -6,7 +6,7 @@
  * - Bearer token
  * - serialização JSON
  * - tratamento padronizado de erros HTTP
- * - respostas 204
+ * - respostas 204 teste
  */
 
 const PUBLIC_API_BASE_URL =
