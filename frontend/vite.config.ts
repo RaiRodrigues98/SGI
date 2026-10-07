@@ -8,7 +8,7 @@ export default defineConfig({
 
   // Deploy self-hosted em Docker/Node.
   // Evita o preset Cloudflare usado pelo ambiente Lovable.
-  nitro: {
-    preset: "node-server",
+nitro: {
+    preset: process.env.VERCEL ? "vercel" : "node-server",
   },
 });
