@@ -21,30 +21,10 @@
   },
   "rewrites": [
     {
-      "source": "/api",
+      "source": "/api/(.*)",
       "destination": {
         "service": "backend"
-      },
-      "transforms": [
-        {
-          "type": "request.path",
-          "op": "set",
-          "args": "/"
-        }
-      ]
-    },
-    {
-      "source": "/api/:path*",
-      "destination": {
-        "service": "backend"
-      },
-      "transforms": [
-        {
-          "type": "request.path",
-          "op": "set",
-          "args": "/:path*"
-        }
-      ]
+      }
     },
     {
       "source": "/(.*)",
