@@ -30,6 +30,10 @@ from services.analise_recontagem import (
     analisar_recontagem_oficial,
 )
 
+from services.analise_gestor import (
+    analisar_inventario_gestor,
+)
+
 from services.analise_recontagem_rotativo import (
     analisar_recontagem_rotativo,
 )
@@ -466,6 +470,103 @@ def visualizar_proxima_rodada(
 
         if possui_decisoes_gestor:
 
+            analise_gestor = (
+                analisar_inventario_gestor(
+                    cursor=cursor,
+                    id_inventario=(
+                        inventario.ID_Inventario
+                    )
+                )
+            )
+
+            resumo_gestor = (
+                analise_gestor.get(
+                    "resumo",
+                    {}
+                )
+            )
+
+            itens_sem_decisao = int(
+                resumo_gestor.get(
+                    "itens_sem_decisao",
+                    0
+                )
+            )
+
+            total_nova_recontagem = int(
+                resumo_gestor.get(
+                    "nova_recontagem",
+                    0
+                )
+            )
+
+            pode_finalizar = bool(
+                analise_gestor.get(
+                    "pode_finalizar_inventario",
+                    False
+                )
+            )
+
+            if itens_sem_decisao > 0:
+
+                return {
+                    "pode_criar":
+                        False,
+
+                    "motivo":
+                        "GESTOR_PENDENTE_DECISAO",
+
+                    "numero_rodada_atual":
+                        numero_atual,
+
+                    "numero_proxima_rodada":
+                        numero_proxima,
+
+                    "tipo_proxima_rodada":
+                        tipo_proxima,
+
+                    "origem_candidatos":
+                        "DECISAO_GESTOR",
+
+                    "candidatos":
+                        0,
+
+                    "pode_encaminhar_gestor":
+                        False
+                }
+
+            if total_nova_recontagem == 0:
+
+                return {
+                    "pode_criar":
+                        False,
+
+                    "motivo":
+                        (
+                            "GESTOR_TRATADO_PRONTO_FINALIZAR"
+                            if pode_finalizar
+                            else "GESTOR_SEM_NOVA_RECONTAGEM"
+                        ),
+
+                    "numero_rodada_atual":
+                        numero_atual,
+
+                    "numero_proxima_rodada":
+                        numero_proxima,
+
+                    "tipo_proxima_rodada":
+                        tipo_proxima,
+
+                    "origem_candidatos":
+                        "DECISAO_GESTOR",
+
+                    "candidatos":
+                        0,
+
+                    "pode_encaminhar_gestor":
+                        False
+                }
+
             candidatos = (
                 _buscar_candidatos_gestor(
                     cursor=cursor,
@@ -474,6 +575,39 @@ def visualizar_proxima_rodada(
                     )
                 )
             )
+
+            if (
+                not candidatos
+                or
+                len(candidatos)
+                != total_nova_recontagem
+            ):
+
+                return {
+                    "pode_criar":
+                        False,
+
+                    "motivo":
+                        "INCONSISTENCIA_DECISOES_GESTOR",
+
+                    "numero_rodada_atual":
+                        numero_atual,
+
+                    "numero_proxima_rodada":
+                        numero_proxima,
+
+                    "tipo_proxima_rodada":
+                        tipo_proxima,
+
+                    "origem_candidatos":
+                        "DECISAO_GESTOR",
+
+                    "candidatos":
+                        len(candidatos),
+
+                    "pode_encaminhar_gestor":
+                        False
+                }
 
             origem_candidatos = (
                 "DECISAO_GESTOR"

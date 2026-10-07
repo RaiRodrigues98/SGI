@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from domain.exceptions import BusinessRuleViolation
 from domain.exceptions import NotFoundError
 
@@ -11,6 +13,10 @@ from services.analise_rotativo import (
 from services.configuracoes_inventario_aplicadas import (
     obter_tipo_rodada_aplicada,
     obter_tipo_proxima_rodada_aplicada,
+)
+
+from services.rodadas.preview import (
+    visualizar_proxima_rodada,
 )
 
 
@@ -551,9 +557,120 @@ def listar_inventarios(
             localizacoes_em_contagem == 0
         )
 
+        # ====================================================
+        # PREVIEW REAL DA PROXIMA RODADA
+        #
+        # A configuracao informa QUAL seria o tipo da proxima
+        # rodada. Ela nao significa, sozinha, que a rodada
+        # realmente pode ser criada.
+        #
+        # Para uma rodada operacional concluida, a Central
+        # consulta a mesma regra utilizada pelo fluxo real de
+        # criacao de rodadas.
+        # ====================================================
+
         proxima_rodada_operacional_configurada = (
             tipo_inventario == "OFICIAL"
-            and tipo_proxima_rodada in {"COMPLETA", "DIVERGENCIAS"}
+            and
+            tipo_proxima_rodada
+            in {
+                "COMPLETA",
+                "DIVERGENCIAS",
+            }
+        )
+
+        deve_avaliar_preview_proxima_rodada = (
+            status_normalizado == "ABERTO"
+            and
+            rodada_operacional_concluida
+            and
+            not bool(linha.EmAnaliseGestor)
+            and
+            proxima_rodada_operacional_configurada
+            and
+            linha.IDRodadaAtual is not None
+            and
+            int(linha.RodadaAtual or 0) > 0
+        )
+
+        preview_proxima_rodada = None
+        preview_proxima_rodada_avaliado = False
+
+        proxima_rodada_operacional_disponivel = False
+
+        if deve_avaliar_preview_proxima_rodada:
+
+            try:
+
+                preview_proxima_rodada = (
+                    visualizar_proxima_rodada(
+                        cursor=cursor,
+                        inventario=SimpleNamespace(
+                            ID_Inventario=int(
+                                linha.ID_Inventario
+                            ),
+                            Tipo=tipo_inventario,
+                        ),
+                        rodada_atual=SimpleNamespace(
+                            ID_Rodada=int(
+                                linha.IDRodadaAtual
+                            ),
+                            NumeroRodada=int(
+                                linha.RodadaAtual
+                            ),
+                        ),
+                    )
+                )
+
+                preview_proxima_rodada_avaliado = (
+                    isinstance(
+                        preview_proxima_rodada,
+                        dict,
+                    )
+                )
+
+            except (
+                BusinessRuleViolation,
+                NotFoundError,
+            ):
+                preview_proxima_rodada = None
+                preview_proxima_rodada_avaliado = False
+
+        if preview_proxima_rodada_avaliado:
+
+            tipo_preview = str(
+                preview_proxima_rodada.get(
+                    "tipo_proxima_rodada"
+                )
+                or ""
+            ).strip().upper()
+
+            proxima_rodada_operacional_disponivel = (
+                bool(
+                    preview_proxima_rodada.get(
+                        "pode_criar",
+                        False,
+                    )
+                )
+                and
+                tipo_preview
+                in {
+                    "COMPLETA",
+                    "DIVERGENCIAS",
+                }
+            )
+
+        # Se havia uma proxima rodada operacional configurada,
+        # mas o preview nao conseguiu ser avaliado, a Central
+        # permanece em RODADA_CONCLUIDA por seguranca.
+        #
+        # Nao devemos liberar finalizacao nem anunciar uma
+        # rodada inexistente com base em uma avaliacao falha.
+
+        preview_operacional_indisponivel = (
+            deve_avaliar_preview_proxima_rodada
+            and
+            not preview_proxima_rodada_avaliado
         )
 
         deve_analisar_divergencias = (
@@ -566,19 +683,26 @@ def listar_inventarios(
                 or
                 bool(linha.EmAnaliseGestor)
             )
-            and not (
-                rodada_operacional_concluida
-                and proxima_rodada_operacional_configurada
-            )
+            and
+            not proxima_rodada_operacional_disponivel
+            and
+            not preview_operacional_indisponivel
         )
 
         if (
             status_normalizado == "ABERTO"
-            and rodada_operacional_concluida
-            and proxima_rodada_operacional_configurada
+            and
+            rodada_operacional_concluida
+            and
+            proxima_rodada_operacional_disponivel
         ):
-            fase_operacional = "PROXIMA_RODADA_DISPONIVEL"
-            proxima_acao = "GERAR_PROXIMA_RODADA"
+            fase_operacional = (
+                "PROXIMA_RODADA_DISPONIVEL"
+            )
+
+            proxima_acao = (
+                "GERAR_PROXIMA_RODADA"
+            )
 
         if deve_analisar_divergencias:
 

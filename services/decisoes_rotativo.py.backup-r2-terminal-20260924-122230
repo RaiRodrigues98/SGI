@@ -1,0 +1,930 @@
+from domain.exceptions import BusinessRuleViolation, NotFoundError
+from services.ocorrencias_divergencia import (
+    registrar_ocorrencia_divergencia,
+    vincular_decisao_rotativo_ocorrencia,
+)
+from services.classificacao_divergencia_rotativo import (
+    obter_diagnostico_item_rotativo,
+)
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def _normalizar_texto(valor):
+
+    if valor is None:
+        return ""
+
+    return str(valor).strip()
+
+
+def _normalizar_localizacao(valor):
+
+    return (
+        _normalizar_texto(valor)
+        .upper()
+    )
+
+
+def _normalizar_lote(valor):
+
+    return _normalizar_texto(valor)
+
+
+def _normalizar_decisao(valor):
+
+    return (
+        _normalizar_texto(valor)
+        .upper()
+    )
+
+
+# ============================================================
+# CALCULAR STATUS
+# ============================================================
+
+def _calcular_status(
+    qtd_estoque: float,
+    qtd_contada: float
+):
+
+    diferenca = (
+        qtd_contada
+        -
+        qtd_estoque
+    )
+
+    if abs(diferenca) <= 0.0001:
+
+        return "OK"
+
+    if qtd_estoque == 0 and qtd_contada > 0:
+
+        return "SOBRA"
+
+    if qtd_estoque > 0 and qtd_contada == 0:
+
+        return "FALTA"
+
+    return "DIVERGÊNCIA"
+
+
+# ============================================================
+# BUSCAR SITUAÇÃO ATUAL DO ITEM
+#
+# ROTATIVO:
+#
+# Localizacao + Codigo + Lote
+# ============================================================
+
+def _buscar_situacao_item(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    localizacao: str,
+    codigo: str,
+    lote: str
+):
+
+    # ========================================================
+    # ESTOQUE DO SNAPSHOT
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            COALESCE(
+                SUM(SaldoInventario),
+                0
+            ) AS QtdEstoque
+
+        FROM dbo.InventarioEstoqueSnapshot
+
+        WHERE
+            ID_Inventario = ?
+
+            AND UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            ) = ?
+
+            AND LTRIM(
+                RTRIM(Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(Lote)
+                ),
+                ''
+            ) = ?
+        """,
+        (
+            id_inventario,
+            localizacao,
+            codigo,
+            lote
+        )
+    )
+
+    estoque = cursor.fetchone()
+
+    qtd_estoque = float(
+        estoque.QtdEstoque or 0
+    )
+
+    # ========================================================
+    # CONTAGEM DA RODADA
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            COALESCE(
+                SUM(C.Quantidade),
+                0
+            ) AS QtdContada
+
+        FROM dbo.Contagens C
+
+        INNER JOIN dbo.SessoesContagem S
+            ON S.ID_Sessao = C.ID_Sessao
+
+        WHERE
+            S.ID_Inventario = ?
+            AND S.ID_Rodada = ?
+            AND S.ValidaParaConsolidacao = 1
+            
+            AND UPPER(
+                LTRIM(
+                    RTRIM(S.Localizacao)
+                )
+            ) = ?
+
+            AND LTRIM(
+                RTRIM(C.Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(C.Lote)
+                ),
+                ''
+            ) = ?
+
+            AND C.Status = 'ATIVA'
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            localizacao,
+            codigo,
+            lote
+        )
+    )
+
+    contagem = cursor.fetchone()
+
+    qtd_contada = float(
+        contagem.QtdContada or 0
+    )
+
+    diferenca = (
+        qtd_contada
+        -
+        qtd_estoque
+    )
+
+    status = (
+        _calcular_status(
+            qtd_estoque=qtd_estoque,
+            qtd_contada=qtd_contada
+        )
+    )
+
+    return {
+        "qtd_estoque":
+            qtd_estoque,
+
+        "qtd_contada":
+            qtd_contada,
+
+        "diferenca":
+            diferenca,
+
+        "status":
+            status
+    }
+
+
+# ============================================================
+# REGISTRAR DECISÃO ROTATIVO
+# ============================================================
+
+def registrar_decisao_rotativo(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    localizacao: str,
+    codigo: str,
+    lote: str,
+    decisao: str,
+    justificativa,
+    usuario: str
+):
+
+    # ========================================================
+    # 1. NORMALIZAÇÃO
+    # ========================================================
+
+    localizacao = (
+        _normalizar_localizacao(
+            localizacao
+        )
+    )
+
+    codigo = (
+        _normalizar_texto(
+            codigo
+        )
+    )
+
+    lote = (
+        _normalizar_lote(
+            lote
+        )
+    )
+
+    decisao = (
+        _normalizar_decisao(
+            decisao
+        )
+    )
+
+    justificativa = (
+        _normalizar_texto(
+            justificativa
+        )
+        or
+        None
+    )
+
+    usuario = (
+        _normalizar_texto(
+            usuario
+        )
+    )
+
+    # ========================================================
+    # 2. VALIDAÇÕES BÁSICAS
+    # ========================================================
+
+    if id_inventario <= 0:
+
+                raise BusinessRuleViolation(
+            "Inventário inválido."
+        )
+
+    if id_rodada <= 0:
+
+                raise BusinessRuleViolation(
+            "Rodada inválida."
+        )
+
+    if not localizacao:
+
+                raise BusinessRuleViolation(
+            "Localização obrigatória."
+        )
+
+    if not codigo:
+
+                raise BusinessRuleViolation(
+            "Código obrigatório."
+        )
+
+    if not usuario:
+
+                raise BusinessRuleViolation(
+            "Usuário obrigatório."
+        )
+
+    decisoes_validas = (
+        "RECONTAR",
+        "JUSTIFICAR_DIVERGENCIA"
+    )
+
+    if decisao not in decisoes_validas:
+
+                raise BusinessRuleViolation(
+            "Decisão inválida. Utilize RECONTAR ou JUSTIFICAR_DIVERGENCIA."
+        )
+
+    if (
+        decisao
+        ==
+        "JUSTIFICAR_DIVERGENCIA"
+        and
+        not justificativa
+    ):
+
+                raise BusinessRuleViolation(
+            "Justificativa obrigatória para JUSTIFICAR_DIVERGENCIA."
+        )
+
+    # ========================================================
+    # 3. VALIDA INVENTÁRIO
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Inventario,
+            CodigoInventario,
+            Tipo,
+            ClienteId,
+            cArmazem,
+            Status,
+            RodadaAtual
+
+        FROM dbo.Inventarios
+
+        WHERE ID_Inventario = ?
+        """,
+        id_inventario
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+
+                raise NotFoundError(
+            "Inventário não encontrado."
+        )
+
+    tipo = (
+        _normalizar_texto(
+            inventario.Tipo
+        )
+        .upper()
+    )
+
+    if tipo != "ROTATIVO":
+
+                raise BusinessRuleViolation(
+            "Esta operação está disponível somente para inventário ROTATIVO."
+        )
+
+    status_inventario = (
+        _normalizar_texto(
+            inventario.Status
+        )
+        .upper()
+    )
+
+    if status_inventario != "ABERTO":
+
+                raise BusinessRuleViolation(
+            "Somente inventário ABERTO pode receber decisão rotativa."
+        )
+
+    # ========================================================
+    # 4. VALIDA RODADA
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT
+            ID_Rodada,
+            NumeroRodada,
+            Status
+
+        FROM dbo.RodadasInventario
+
+        WHERE
+            ID_Rodada = ?
+            AND ID_Inventario = ?
+        """,
+        (
+            id_rodada,
+            id_inventario
+        )
+    )
+
+    rodada = cursor.fetchone()
+
+    if not rodada:
+
+                raise NotFoundError(
+            "Rodada não encontrada para este inventário."
+        )
+
+    status_rodada = (
+        _normalizar_texto(
+            rodada.Status
+        )
+        .upper()
+    )
+
+    if status_rodada == "CANCELADA":
+
+                raise BusinessRuleViolation(
+            "Rodada cancelada não pode receber decisão."
+        )
+
+    # ========================================================
+    # 5. LOCALIZAÇÃO PRECISA ESTAR CONCLUÍDA
+    # ========================================================
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            ID_Sessao,
+            Status,
+            DataHoraFim
+
+        FROM dbo.SessoesContagem
+
+        WHERE
+            ID_Inventario = ?
+            AND ID_Rodada = ?
+
+            AND UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            ) = ?
+
+        ORDER BY
+            ID_Sessao DESC
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            localizacao
+        )
+    )
+
+    sessao = cursor.fetchone()
+
+    if not sessao:
+
+                raise BusinessRuleViolation(
+            "A localização ainda não possui sessão de contagem nesta rodada."
+        )
+
+    if (
+        _normalizar_texto(
+            sessao.Status
+        )
+        .upper()
+        !=
+        "ENCERRADA"
+    ):
+
+                raise BusinessRuleViolation(
+            "A localização precisa estar concluída antes da decisão."
+        )
+
+    # ========================================================
+    # 6. DIAGNÓSTICO CENTRAL DA DIVERGÊNCIA
+    # ========================================================
+
+    situacao = obter_diagnostico_item_rotativo(
+        cursor=cursor,
+        id_inventario=id_inventario,
+        id_sessao=sessao.ID_Sessao,
+        localizacao=localizacao,
+        codigo=codigo,
+        lote=lote,
+    )
+
+    status_divergencia = situacao["status"]
+
+    subtipo_divergencia = (
+        situacao.get("subtipo_divergencia")
+    )
+
+    if status_divergencia == "OK":
+
+                raise BusinessRuleViolation(
+            "O item está OK e não necessita decisão de divergência."
+        )
+
+    # ========================================================
+    # 7. GARANTE OCORRÊNCIA DE DIVERGÊNCIA
+    # ========================================================
+
+    ocorrencia = (
+        registrar_ocorrencia_divergencia(
+            cursor=cursor,
+            cliente_id=inventario.ClienteId,
+            id_inventario=id_inventario,
+            id_rodada=id_rodada,
+            tipo_inventario="ROTATIVO",
+            localizacao=localizacao,
+            codigo=codigo,
+            lote=lote,
+            qtd_estoque=(
+                situacao["qtd_estoque"]
+            ),
+            qtd_contada=(
+                situacao["qtd_contada"]
+            ),
+            tipo_divergencia=(
+                status_divergencia
+            ),
+            usuario=usuario,
+            subtipo_divergencia=(
+                subtipo_divergencia
+            )
+        )
+    )
+
+    id_ocorrencia = (
+        ocorrencia["id_ocorrencia"]
+    )
+
+    # ========================================================
+    # 8. DESATIVA DECISÃO ANTERIOR
+    #
+    # Permite alterar decisão enquanto o inventário
+    # permanece aberto.
+    # ========================================================
+
+    cursor.execute(
+        """
+        UPDATE dbo.DecisoesRotativo
+
+        SET Status = 'SUBSTITUIDA'
+
+        WHERE
+            ID_Inventario = ?
+            AND ID_Rodada = ?
+
+            AND UPPER(
+                LTRIM(
+                    RTRIM(Localizacao)
+                )
+            ) = ?
+
+            AND LTRIM(
+                RTRIM(Codigo)
+            ) = ?
+
+            AND ISNULL(
+                LTRIM(
+                    RTRIM(Lote)
+                ),
+                ''
+            ) = ?
+
+            AND Status = 'ATIVA'
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            localizacao,
+            codigo,
+            lote
+        )
+    )
+
+    # ========================================================
+    # 9. GRAVA NOVA DECISÃO
+    # ========================================================
+
+    cursor.execute(
+        """
+        INSERT INTO dbo.DecisoesRotativo
+        (
+            ID_Inventario,
+            ID_Rodada,
+            Localizacao,
+            Codigo,
+            Lote,
+            StatusDivergencia,
+            Decisao,
+            Justificativa,
+            Usuario,
+            DataHora,
+            Status
+        )
+
+        OUTPUT
+            INSERTED.ID_DecisaoRotativo,
+            INSERTED.DataHora
+
+        VALUES
+        (
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            SYSDATETIME(),
+            'ATIVA'
+        )
+        """,
+        (
+            id_inventario,
+            id_rodada,
+            localizacao,
+            codigo,
+            lote,
+            status_divergencia,
+            decisao,
+            justificativa,
+            usuario
+        )
+    )
+
+    nova_decisao = cursor.fetchone()
+    # ========================================================
+    # VINCULA DECISÃO À OCORRÊNCIA
+    # ========================================================
+
+    vincular_decisao_rotativo_ocorrencia(
+        cursor=cursor,
+        id_ocorrencia=id_ocorrencia,
+        id_decisao_rotativo=(
+            nova_decisao.ID_DecisaoRotativo
+        ),
+        decisao=decisao,
+        justificativa=justificativa,
+        usuario=usuario
+    )
+    # ========================================================
+    # 10. RETORNO
+    # ========================================================
+
+    return {
+        "sucesso":
+            True,
+
+        "id_decisao_rotativo":
+            nova_decisao.ID_DecisaoRotativo,
+
+        "id_ocorrencia":
+            id_ocorrencia,
+
+        "id_inventario":
+            id_inventario,
+
+        "cliente_id":
+            inventario.ClienteId,
+
+        "armazem":
+            inventario.cArmazem,
+
+        "codigo_inventario":
+            inventario.CodigoInventario,
+
+        "id_rodada":
+            id_rodada,
+
+        "numero_rodada":
+            rodada.NumeroRodada,
+
+        "localizacao":
+            localizacao,
+
+        "codigo":
+            codigo,
+
+        "lote":
+            lote,
+
+        "qtd_estoque":
+            situacao["qtd_estoque"],
+
+        "qtd_contada":
+            situacao["qtd_contada"],
+
+        "diferenca":
+            situacao["diferenca"],
+
+        "status_divergencia":
+            status_divergencia,
+
+        "subtipo_divergencia":
+            subtipo_divergencia,
+
+        "decisao":
+            decisao,
+
+        "justificativa":
+            justificativa,
+
+        "usuario":
+            usuario,
+
+        "data_hora":
+            nova_decisao.DataHora,
+
+        "status":
+            "ATIVA",
+
+        "pendente_recontagem":
+            (
+                decisao
+                ==
+                "RECONTAR"
+            ),
+
+        "divergencia_justificada":
+            (
+                decisao
+                ==
+                "JUSTIFICAR_DIVERGENCIA"
+            ),
+
+        "mensagem":
+            (
+                "Decisão do inventário rotativo "
+                "registrada com sucesso."
+            )
+    }
+
+
+# ============================================================
+# LISTAR DECISÕES ATIVAS DO ROTATIVO
+# ============================================================
+
+def listar_decisoes_rotativo_ativas(
+    cursor,
+    id_inventario: int
+):
+
+    cursor.execute(
+        """
+        SELECT
+            ID_DecisaoRotativo,
+            ID_Inventario,
+            ID_Rodada,
+            Localizacao,
+            Codigo,
+            ISNULL(Lote, '') AS Lote,
+            StatusDivergencia,
+            Decisao,
+            Justificativa,
+            Usuario,
+            DataHora,
+            Status
+
+        FROM dbo.DecisoesRotativo
+
+        WHERE
+            ID_Inventario = ?
+            AND Status = 'ATIVA'
+
+        ORDER BY
+            ID_Rodada,
+            Localizacao,
+            Codigo,
+            Lote
+        """,
+        id_inventario
+    )
+
+    linhas = cursor.fetchall()
+
+    return [
+        {
+            "id_decisao_rotativo":
+                linha.ID_DecisaoRotativo,
+
+            "id_inventario":
+                linha.ID_Inventario,
+
+            "id_rodada":
+                linha.ID_Rodada,
+
+            "localizacao":
+                linha.Localizacao,
+
+            "codigo":
+                linha.Codigo,
+
+            "lote":
+                linha.Lote,
+
+            "status_divergencia":
+                linha.StatusDivergencia,
+
+            "decisao":
+                linha.Decisao,
+
+            "justificativa":
+                linha.Justificativa,
+
+            "usuario":
+                linha.Usuario,
+
+            "data_hora":
+                linha.DataHora,
+
+            "status":
+                linha.Status
+        }
+
+        for linha in linhas
+    ]
+
+
+# ============================================================
+# REGISTRAR DECISOES ROTATIVO EM LOTE
+# ============================================================
+
+def registrar_decisoes_rotativo_lote(
+    cursor,
+    id_inventario: int,
+    id_rodada: int,
+    itens,
+    decisao: str,
+    justificativa,
+    usuario: str
+):
+    itens = list(itens or [])
+
+    if not itens:
+        raise BusinessRuleViolation(
+            "Selecione pelo menos uma divergência."
+        )
+
+    if len(itens) > 500:
+        raise BusinessRuleViolation(
+            "O limite por operação é de 500 divergências."
+        )
+
+    chaves = set()
+    resultados = []
+
+    for indice, item in enumerate(
+        itens,
+        start=1
+    ):
+        localizacao = _normalizar_localizacao(
+            item.get("localizacao")
+        )
+        codigo = _normalizar_texto(
+            item.get("codigo")
+        )
+        lote = _normalizar_lote(
+            item.get("lote")
+        )
+
+        chave = (
+            localizacao,
+            codigo,
+            lote
+        )
+
+        if chave in chaves:
+            raise BusinessRuleViolation(
+                "A seleção possui uma divergência duplicada: "
+                f"{codigo} · {localizacao} · lote {lote or '-'}."
+            )
+
+        chaves.add(chave)
+
+        try:
+            resultado = registrar_decisao_rotativo(
+                cursor=cursor,
+                id_inventario=id_inventario,
+                id_rodada=id_rodada,
+                localizacao=localizacao,
+                codigo=codigo,
+                lote=lote,
+                decisao=decisao,
+                justificativa=justificativa,
+                usuario=usuario,
+            )
+        except (
+            BusinessRuleViolation,
+            NotFoundError
+        ) as erro:
+            raise type(erro)(
+                f"Item {indice} ({codigo or 'sem código'}): {erro}"
+            ) from erro
+
+        resultados.append(resultado)
+
+    return {
+        "sucesso": True,
+        "quantidade_processada": len(resultados),
+        "decisao": _normalizar_decisao(
+            decisao
+        ),
+        "resultados": resultados,
+        "mensagem": (
+            f"{len(resultados)} decisão(ões) "
+            "registrada(s) com sucesso."
+        ),
+    }

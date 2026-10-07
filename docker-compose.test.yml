@@ -4,6 +4,7 @@ services:
     restart: "no"
     environment:
       FRONTEND_URL: http://27.78.101.5:3101
+      DB_DATABASE: InventarioHom
   frontend:
     container_name: sgi_test_frontend
     restart: "no"

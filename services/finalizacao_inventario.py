@@ -332,26 +332,63 @@ def finalizar_inventario_oficial(
         )
     )
 
+    operacao_concluida = bool(
+        analise.get(
+            "operacao_concluida",
+            False
+        )
+    )
+
+    rodadas_nao_finalizadas = (
+        analise.get(
+            "rodadas_nao_finalizadas"
+        )
+        or []
+    )
+
     # ========================================================
-    # 5. TRAVAS GERENCIAIS
+    # 5. TRAVAS GERENCIAIS E OPERACIONAIS
     # ========================================================
+
+    if not operacao_concluida:
+
+        total_rodadas_nao_finalizadas = len(
+            rodadas_nao_finalizadas
+        )
+
+        if total_rodadas_nao_finalizadas > 0:
+
+            raise BusinessRuleViolation(
+                "A opera??o do invent?rio ainda n?o foi "
+                "conclu?da. "
+                f"Existem {total_rodadas_nao_finalizadas} "
+                "rodada(s) n?o finalizada(s)."
+            )
+
+        raise BusinessRuleViolation(
+            "A opera??o do invent?rio ainda n?o foi "
+            "conclu?da."
+        )
 
     if itens_sem_decisao > 0:
 
-                raise BusinessRuleViolation(
-            "Ainda existem {itens_sem_decisao} item(ns) sem decisão gerencial."
+        raise BusinessRuleViolation(
+            f"Ainda existem {itens_sem_decisao} "
+            "item(ns) sem decis?o gerencial."
         )
 
     if nova_recontagem > 0:
 
-                raise BusinessRuleViolation(
-            "Existem {nova_recontagem} item(ns) marcados para NOVA_RECONTAGEM."
+        raise BusinessRuleViolation(
+            f"Existem {nova_recontagem} item(ns) "
+            "marcados para NOVA_RECONTAGEM."
         )
 
     if not pode_finalizar:
 
-                raise BusinessRuleViolation(
-            "O inventário ainda não atende aos critérios de finalização."
+        raise BusinessRuleViolation(
+            "O invent?rio ainda n?o atende aos "
+            "crit?rios de finaliza??o."
         )
 
     # ========================================================
@@ -383,7 +420,7 @@ def finalizar_inventario_oficial(
         if quantidade_final is None:
 
                         raise BusinessRuleViolation(
-                "O item {codigo} | {lote} não possui quantidade final gerencial definida."
+                f"O item {codigo} | {lote} não possui quantidade final gerencial definida."
             )
 
         quantidade_final = float(
@@ -451,7 +488,7 @@ def finalizar_inventario_oficial(
         else:
 
                         raise BusinessRuleViolation(
-                "Situação gerencial inválida para finalização do item {codigo} | {lote}: {situacao_gerencial}."
+                f"Situação gerencial inválida para finalização do item {codigo} | {lote}: {situacao_gerencial}."
             )
 
         # ====================================================

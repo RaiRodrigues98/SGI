@@ -7,6 +7,8 @@ from services.indicadores_operacionais import (
     obter_acompanhamento_inventario,
     obter_acompanhamento_localizacoes,
     obter_produtividade_inventario,
+    obter_movimentacao_12_meses,
+    obter_valoracao_estoque,
 )
 
 router = APIRouter(
@@ -179,6 +181,102 @@ def consultar_produtividade_operacional(
 
     finally:
 
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()
+
+# ============================================================
+# MOVIMENTACAO DOS ULTIMOS 12 MESES
+# MOVIMENTACAO_12_MESES_V1
+# ============================================================
+
+@router.get(
+    "/{id_inventario}/indicadores/movimentacao-12-meses"
+)
+def consultar_movimentacao_12_meses(
+    id_inventario: int
+):
+
+    conn = None
+    cursor = None
+
+    try:
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        return obter_movimentacao_12_meses(
+            cursor=cursor,
+            id_inventario=id_inventario
+        )
+
+    except NotFoundError as erro:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(erro)
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# VALORACAO DO ESTOQUE
+# VALORACAO_ESTOQUE_V1
+# ============================================================
+
+@router.get(
+    "/{id_inventario}/indicadores/valoracao-estoque"
+)
+def consultar_valoracao_estoque(
+    id_inventario: int
+):
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        return obter_valoracao_estoque(
+            cursor=cursor,
+            id_inventario=id_inventario
+        )
+
+    except NotFoundError as erro:
+        raise HTTPException(
+            status_code=404,
+            detail=str(erro)
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as erro:
+        raise HTTPException(
+            status_code=500,
+            detail=str(erro)
+        )
+
+    finally:
         if cursor:
             cursor.close()
 

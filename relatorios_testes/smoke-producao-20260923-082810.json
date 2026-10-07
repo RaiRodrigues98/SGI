@@ -1,0 +1,73 @@
+{
+  "suite": "SGI smoke producao somente leitura",
+  "api_base": "http://27.78.101.5:3001/api",
+  "inicio_utc": "2026-09-23T11:26:17.925309+00:00",
+  "fim_utc": "2026-09-23T11:28:10.264224+00:00",
+  "referencia_id": 1653,
+  "resultados": [
+    {
+      "nome": "OpenAPI",
+      "status": "PASS",
+      "detalhe": "HTTP 200; versao 3.1.0",
+      "duracao_ms": 173
+    },
+    {
+      "nome": "Protecao sem login",
+      "status": "PASS",
+      "detalhe": "HTTP 401",
+      "duracao_ms": 72
+    },
+    {
+      "nome": "Login",
+      "status": "PASS",
+      "detalhe": "HTTP 200; token oculto",
+      "duracao_ms": 825
+    },
+    {
+      "nome": "Usuario autenticado",
+      "status": "PASS",
+      "detalhe": "usuario autenticado: Rai Rodrigues",
+      "duracao_ms": 64
+    },
+    {
+      "nome": "Clientes disponiveis",
+      "status": "PASS",
+      "detalhe": "clientes encontrados: [53, 57]",
+      "duracao_ms": 140
+    },
+    {
+      "nome": "Inventarios ativos - ENDRESS+HAUSER CONTROLE E AUTOMAÇÃO LTDA.",
+      "status": "PASS",
+      "detalhe": "ativos=0",
+      "duracao_ms": 205
+    },
+    {
+      "nome": "Inventarios ativos - UM GRAU E MEIO",
+      "status": "PASS",
+      "detalhe": "ativos=0",
+      "duracao_ms": 306
+    },
+    {
+      "nome": "Inventario referencia #1653",
+      "status": "PASS",
+      "detalhe": "inventario #1653 acessivel",
+      "duracao_ms": 122
+    },
+    {
+      "nome": "Rodadas referencia #1653",
+      "status": "FAIL",
+      "detalhe": "nenhuma rodada retornada",
+      "duracao_ms": 45
+    },
+    {
+      "nome": "Resultado final referencia #1653",
+      "status": "PASS",
+      "detalhe": "resultado final do #1653 disponivel",
+      "duracao_ms": 48
+    }
+  ],
+  "totais": {
+    "pass": 9,
+    "fail": 1
+  }
+}

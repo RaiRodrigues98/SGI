@@ -1,0 +1,10 @@
+﻿{
+    "sistema":  "SGI",
+    "release":  "20260922-100944",
+    "gerado_em":  "2026-09-22T10:09:46.6090424-03:00",
+    "commit_principal":  "18d70b519f7e1382ae94830b779e83d0e68bb815",
+    "commit_frontend":  "7c1302cc0662b5dc80e77241acd93912427f590f",
+    "arquivo":  "SGI-deploy-20260922-100944.tar.gz",
+    "sha256":  "7C1147AA85FA889239F15B26ECA99DFB0B987B9BFBAAC129C44AFABAFB93C8FD",
+    "tamanho_mb":  2.85
+}

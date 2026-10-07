@@ -434,6 +434,30 @@ def analisar_rodada_oficial(
 
             WHERE E.ID_Inventario = ?
 
+              AND
+              (
+                  /*
+                   * Na R1, o universo da análise é todo o
+                   * snapshot do inventário.
+                   *
+                   * Na R2+, a rodada possui um escopo próprio
+                   * de localizações. Considerar o snapshot
+                   * completo faria itens de outras localizações
+                   * aparecerem como não iniciados ou faltantes.
+                   */
+                  ? = 1
+
+                  OR EXISTS
+                  (
+                      SELECT 1
+
+                      FROM dbo.RodadaLocalizacoes ER
+
+                      WHERE ER.ID_Rodada = ?
+                        AND ER.Localizacao = E.Localizacao
+                  )
+              )
+
             GROUP BY
 
                 E.Codigo,
@@ -576,6 +600,8 @@ def analisar_rodada_oficial(
         (
             rodada.ID_Rodada,
             inventario.ID_Inventario,
+            int(rodada.NumeroRodada),
+            rodada.ID_Rodada,
             inventario.ID_Inventario,
             rodada.ID_Rodada
         )

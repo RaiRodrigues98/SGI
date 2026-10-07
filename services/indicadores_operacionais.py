@@ -2672,3 +2672,1115 @@ def obter_produtividade_inventario(
             tempos_localizacoes
     }
 
+# ============================================================
+# MOVIMENTACAO DOS ULTIMOS 12 MESES
+# MOVIMENTACAO_12_MESES_V1
+# ============================================================
+
+_ARMAZEM_ESTABELECIMENTO_CNPJ = {
+    "ML007": "63590553000161",
+}
+
+
+def _subtrair_um_ano(data: datetime) -> datetime:
+    """
+    Retorna exatamente um ano antes da data informada.
+
+    Trata 29/02 convertendo para 28/02 quando o ano anterior
+    nao for bissexto.
+    """
+
+    try:
+        return data.replace(
+            year=data.year - 1
+        )
+    except ValueError:
+        return data.replace(
+            year=data.year - 1,
+            day=28
+        )
+
+
+def obter_movimentacao_12_meses(
+    cursor,
+    id_inventario: int
+):
+    """
+    Retorna recebimentos e expedicoes efetivamente movimentados
+    nos 12 meses anteriores a finalizacao de um inventario OFICIAL.
+
+    Regras:
+
+    Recebimento:
+    - documento nao cancelado;
+    - item conferido;
+    - DataConferido preenchida;
+    - qArmazenada > 0;
+    - quantidade = qArmazenada;
+    - valor = qArmazenada * ValorUnitario.
+
+    Expedicao:
+    - documento nao cancelado;
+    - DataExpedicao preenchida;
+    - linha local nao cancelada;
+    - cArmazem igual ao inventario;
+    - qExpedida > 0;
+    - quantidade = qExpedida;
+    - valor = qExpedida * ValorUnitario.
+
+    Periodo:
+    - fim = DataHoraFinalizacao do inventario;
+    - inicio = exatamente 1 ano antes.
+    """
+
+    # --------------------------------------------------------
+    # INVENTARIO + DATA FINAL
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            I.ID_Inventario,
+            I.CodigoInventario,
+            I.Tipo,
+            I.ClienteId,
+            I.Cliente,
+            LTRIM(RTRIM(I.cArmazem)) AS Armazem,
+            MAX(RF.DataHoraFinalizacao) AS DataHoraFinalizacao
+
+        FROM dbo.Inventarios I
+
+        LEFT JOIN dbo.InventarioResultadoFinal RF
+            ON RF.ID_Inventario = I.ID_Inventario
+
+        WHERE
+            I.ID_Inventario = ?
+
+        GROUP BY
+            I.ID_Inventario,
+            I.CodigoInventario,
+            I.Tipo,
+            I.ClienteId,
+            I.Cliente,
+            I.cArmazem
+        """,
+        (
+            id_inventario,
+        )
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+        raise NotFoundError(
+            "Inventário não encontrado."
+        )
+
+    tipo = _normalizar_texto(
+        inventario[2]
+    ).upper()
+
+    if tipo != "OFICIAL":
+        raise NotFoundError(
+            "Movimentação de 12 meses disponível somente "
+            "para inventário oficial."
+        )
+
+    cliente_id = inventario[3]
+
+    cliente = _normalizar_texto(
+        inventario[4]
+    )
+
+    armazem = _normalizar_texto(
+        inventario[5]
+    ).upper()
+
+    data_fim = inventario[6]
+
+    if data_fim is None:
+        raise NotFoundError(
+            "Inventário oficial ainda não possui "
+            "resultado final."
+        )
+
+    data_inicio = _subtrair_um_ano(
+        data_fim
+    )
+
+    # --------------------------------------------------------
+    # CNPJ CLIENTE
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            C.Cnpj
+        FROM AlzarsiLog.dbo.Cliente C
+        WHERE
+            C.Id = ?
+        """,
+        (
+            cliente_id,
+        )
+    )
+
+    linha_cliente = cursor.fetchone()
+
+    if (
+        not linha_cliente
+        or
+        linha_cliente[0] is None
+    ):
+        raise NotFoundError(
+            "Cliente não encontrado no AlzarsiLog."
+        )
+
+    cnpj_cliente = _normalizar_texto(
+        linha_cliente[0]
+    )
+
+    # --------------------------------------------------------
+    # ESTABELECIMENTO
+    # --------------------------------------------------------
+
+    cnpj_estabelecimento = (
+        _ARMAZEM_ESTABELECIMENTO_CNPJ.get(
+            armazem
+        )
+    )
+
+    if not cnpj_estabelecimento:
+        raise NotFoundError(
+            f"Armazém {armazem} sem CNPJ de "
+            "estabelecimento configurado."
+        )
+
+    # --------------------------------------------------------
+    # MOVIMENTACOES
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        SET NOCOUNT ON;
+
+        DECLARE @CnpjCliente VARCHAR(30) = ?;
+        DECLARE @CnpjEstabelecimento VARCHAR(30) = ?;
+        DECLARE @Armazem VARCHAR(50) = ?;
+        DECLARE @DataInicio DATETIME2 = ?;
+        DECLARE @DataFim DATETIME2 = ?;
+
+        ;WITH Recebimentos AS
+        (
+            SELECT
+                R.Id AS DocumentoId,
+                RI.Id AS LinhaId,
+                RI.CodigoItem,
+
+                CAST(
+                    ISNULL(
+                        RI.qArmazenada,
+                        0
+                    )
+                    AS DECIMAL(19,4)
+                ) AS Quantidade,
+
+                CAST(
+                    RI.ValorUnitario
+                    AS DECIMAL(19,6)
+                ) AS ValorUnitario
+
+            FROM AlzarsiLog.dbo.Recebimento R
+
+            INNER JOIN
+                AlzarsiLog.dbo.RecebimentoItem RI
+                ON RI.RecebimentoId = R.Id
+
+            WHERE
+                R.CnpjCliente = @CnpjCliente
+
+                AND R.CnpjEstabelecimento =
+                    @CnpjEstabelecimento
+
+                AND R.DataCancelado IS NULL
+
+                AND RI.Conferido = 1
+
+                AND RI.DataConferido IS NOT NULL
+
+                AND ISNULL(
+                    RI.qArmazenada,
+                    0
+                ) > 0
+
+                AND RI.DataConferido >=
+                    @DataInicio
+
+                AND RI.DataConferido <=
+                    @DataFim
+        ),
+
+        ResumoRecebimentos AS
+        (
+            SELECT
+                COUNT(
+                    DISTINCT DocumentoId
+                ) AS Documentos,
+
+                COUNT(*) AS Linhas,
+
+                COUNT(
+                    DISTINCT CodigoItem
+                ) AS SKUs,
+
+                ISNULL(
+                    SUM(Quantidade),
+                    0
+                ) AS Quantidade,
+
+                ISNULL(
+                    SUM(
+                        CASE
+                            WHEN ValorUnitario IS NULL
+                                THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS LinhasSemValor,
+
+                ISNULL(
+                    SUM(
+                        CASE
+                            WHEN ValorUnitario IS NOT NULL
+                                THEN
+                                    Quantidade
+                                    *
+                                    ValorUnitario
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS ValorConhecido
+
+            FROM Recebimentos
+        ),
+
+        Expedicoes AS
+        (
+            SELECT
+                E.Id AS DocumentoId,
+                EILL.Id AS LinhaId,
+                EI.CodigoItem,
+
+                CAST(
+                    ISNULL(
+                        EILL.qExpedida,
+                        0
+                    )
+                    AS DECIMAL(19,4)
+                ) AS Quantidade,
+
+                CAST(
+                    EI.ValorUnitario
+                    AS DECIMAL(19,6)
+                ) AS ValorUnitario
+
+            FROM AlzarsiLog.dbo.Expedicao E
+
+            INNER JOIN
+                AlzarsiLog.dbo.ExpedicaoItem EI
+                ON EI.ExpedicaoId = E.Id
+
+            INNER JOIN
+                AlzarsiLog.dbo.ExpedicaoItemLinhaLocal EILL
+                ON EILL.ExpedicaoItemId = EI.Id
+
+            WHERE
+                E.CnpjCliente = @CnpjCliente
+
+                AND E.CnpjEstabelecimento =
+                    @CnpjEstabelecimento
+
+                AND E.DataCancelado IS NULL
+
+                AND E.DataExpedicao IS NOT NULL
+
+                AND EILL.DataCancelamento IS NULL
+
+                AND LTRIM(
+                    RTRIM(EILL.cArmazem)
+                ) = @Armazem
+
+                AND ISNULL(
+                    EILL.qExpedida,
+                    0
+                ) > 0
+
+                AND E.DataExpedicao >=
+                    @DataInicio
+
+                AND E.DataExpedicao <=
+                    @DataFim
+        ),
+
+        ResumoExpedicoes AS
+        (
+            SELECT
+                COUNT(
+                    DISTINCT DocumentoId
+                ) AS Documentos,
+
+                COUNT(*) AS Linhas,
+
+                COUNT(
+                    DISTINCT CodigoItem
+                ) AS SKUs,
+
+                ISNULL(
+                    SUM(Quantidade),
+                    0
+                ) AS Quantidade,
+
+                ISNULL(
+                    SUM(
+                        CASE
+                            WHEN ValorUnitario IS NULL
+                                THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS LinhasSemValor,
+
+                ISNULL(
+                    SUM(
+                        CASE
+                            WHEN ValorUnitario IS NOT NULL
+                                THEN
+                                    Quantidade
+                                    *
+                                    ValorUnitario
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS ValorConhecido
+
+            FROM Expedicoes
+        )
+
+        SELECT
+            R.Documentos,
+            R.Linhas,
+            R.SKUs,
+            R.Quantidade,
+            R.LinhasSemValor,
+            R.ValorConhecido,
+
+            E.Documentos,
+            E.Linhas,
+            E.SKUs,
+            E.Quantidade,
+            E.LinhasSemValor,
+            E.ValorConhecido
+
+        FROM ResumoRecebimentos R
+        CROSS JOIN ResumoExpedicoes E;
+        """,
+        (
+            cnpj_cliente,
+            cnpj_estabelecimento,
+            armazem,
+            data_inicio,
+            data_fim
+        )
+    )
+
+    resumo = cursor.fetchone()
+
+    if not resumo:
+        raise NotFoundError(
+            "Não foi possível calcular a movimentação."
+        )
+
+    recebimentos_documentos = int(
+        resumo[0] or 0
+    )
+    recebimentos_linhas = int(
+        resumo[1] or 0
+    )
+    recebimentos_skus = int(
+        resumo[2] or 0
+    )
+    recebimentos_quantidade = float(
+        resumo[3] or 0
+    )
+    recebimentos_sem_valor = int(
+        resumo[4] or 0
+    )
+    recebimentos_valor_conhecido = float(
+        resumo[5] or 0
+    )
+
+    expedicoes_documentos = int(
+        resumo[6] or 0
+    )
+    expedicoes_linhas = int(
+        resumo[7] or 0
+    )
+    expedicoes_skus = int(
+        resumo[8] or 0
+    )
+    expedicoes_quantidade = float(
+        resumo[9] or 0
+    )
+    expedicoes_sem_valor = int(
+        resumo[10] or 0
+    )
+    expedicoes_valor_conhecido = float(
+        resumo[11] or 0
+    )
+
+    recebimentos_valor = (
+        None
+        if recebimentos_sem_valor > 0
+        else recebimentos_valor_conhecido
+    )
+
+    expedicoes_valor = (
+        None
+        if expedicoes_sem_valor > 0
+        else expedicoes_valor_conhecido
+    )
+
+    valor_total = (
+        None
+        if (
+            recebimentos_valor is None
+            or
+            expedicoes_valor is None
+        )
+        else
+        recebimentos_valor
+        +
+        expedicoes_valor
+    )
+
+    return {
+        "id_inventario": int(
+            inventario[0]
+        ),
+        "codigo_inventario": _normalizar_texto(
+            inventario[1]
+        ),
+        "cliente_id": int(
+            cliente_id
+        ),
+        "cliente": cliente,
+        "armazem": armazem,
+
+        "periodo": {
+            "inicio": data_inicio,
+            "fim": data_fim,
+            "dias": (
+                data_fim
+                -
+                data_inicio
+            ).days,
+        },
+
+        "recebimentos": {
+            "documentos":
+                recebimentos_documentos,
+
+            "linhas":
+                recebimentos_linhas,
+
+            "skus":
+                recebimentos_skus,
+
+            "quantidade":
+                recebimentos_quantidade,
+
+            "valor":
+                recebimentos_valor,
+
+            "linhas_sem_valor":
+                recebimentos_sem_valor,
+        },
+
+        "expedicoes": {
+            "documentos":
+                expedicoes_documentos,
+
+            "linhas":
+                expedicoes_linhas,
+
+            "skus":
+                expedicoes_skus,
+
+            "quantidade":
+                expedicoes_quantidade,
+
+            "valor":
+                expedicoes_valor,
+
+            "linhas_sem_valor":
+                expedicoes_sem_valor,
+        },
+
+        "total": {
+            "documentos":
+                recebimentos_documentos
+                +
+                expedicoes_documentos,
+
+            "linhas":
+                recebimentos_linhas
+                +
+                expedicoes_linhas,
+
+            "quantidade":
+                recebimentos_quantidade
+                +
+                expedicoes_quantidade,
+
+            "valor_movimentado":
+                valor_total,
+        },
+    }
+
+
+# ============================================================
+# VALORACAO DO ESTOQUE DO INVENTARIO
+# VALORACAO_ESTOQUE_V1
+#
+# Prioridade:
+# 1. ValorUnitario congelado no snapshot.
+# 2. Ultimo recebimento valido do mesmo Codigo + Lote.
+# 3. Ultimo recebimento valido do mesmo Codigo.
+# 4. Sem custo.
+#
+# A consulta e somente leitura. O snapshot nao e alterado.
+# ============================================================
+
+def obter_valoracao_estoque(
+    cursor,
+    id_inventario: int
+):
+    cursor.execute(
+        """
+        SELECT
+            I.Tipo,
+            I.ClienteId,
+            I.Cliente,
+            I.cArmazem,
+
+            (
+                SELECT
+                    MAX(RF.DataHoraFinalizacao)
+                FROM dbo.InventarioResultadoFinal RF
+                WHERE
+                    RF.ID_Inventario = I.ID_Inventario
+            ) AS DataFim
+
+        FROM dbo.Inventarios I
+
+        WHERE
+            I.ID_Inventario = ?
+        """,
+        (
+            id_inventario,
+        )
+    )
+
+    inventario = cursor.fetchone()
+
+    if not inventario:
+        raise NotFoundError(
+            "Inventário não encontrado."
+        )
+
+    tipo = _normalizar_texto(
+        inventario[0]
+    ).upper()
+
+    if tipo != "OFICIAL":
+        raise NotFoundError(
+            "Valoração disponível somente "
+            "para inventário oficial."
+        )
+
+    cliente_id = inventario[1]
+
+    cliente = _normalizar_texto(
+        inventario[2]
+    )
+
+    armazem = _normalizar_texto(
+        inventario[3]
+    ).upper()
+
+    data_fim = inventario[4]
+
+    if data_fim is None:
+        raise NotFoundError(
+            "Inventário oficial ainda não possui "
+            "resultado final."
+        )
+
+    # --------------------------------------------------------
+    # CLIENTE NO ALZARSILOG
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        SELECT
+            C.Cnpj
+        FROM AlzarsiLog.dbo.Cliente C
+        WHERE
+            C.Id = ?
+        """,
+        (
+            cliente_id,
+        )
+    )
+
+    linha_cliente = cursor.fetchone()
+
+    if (
+        not linha_cliente
+        or
+        linha_cliente[0] is None
+    ):
+        raise NotFoundError(
+            "Cliente n?o encontrado no AlzarsiLog."
+        )
+
+    cnpj_cliente = _normalizar_texto(
+        linha_cliente[0]
+    )
+
+    # --------------------------------------------------------
+    # ESTABELECIMENTO
+    # --------------------------------------------------------
+
+    cnpj_estabelecimento = (
+        _ARMAZEM_ESTABELECIMENTO_CNPJ.get(
+            armazem
+        )
+    )
+
+    if not cnpj_estabelecimento:
+        raise NotFoundError(
+            f"Armaz?m {armazem} sem CNPJ de "
+            "estabelecimento configurado."
+        )
+
+    # --------------------------------------------------------
+    # VALORACAO
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        SET NOCOUNT ON;
+
+        DECLARE @CnpjCliente VARCHAR(30) = ?;
+        DECLARE @CnpjEstabelecimento VARCHAR(30) = ?;
+        DECLARE @DataFim DATETIME2 = ?;
+
+        SELECT
+            S.ID_Snapshot,
+            S.Codigo,
+            S.Lote,
+            S.qArmazenado,
+
+            CAST(
+                S.ValorUnitario
+                AS DECIMAL(19,6)
+            ) AS ValorSnapshot,
+
+            CAST(
+                COALESCE(
+                    S.ValorUnitario,
+                    RL.ValorUnitario,
+                    RC.ValorUnitario
+                )
+                AS DECIMAL(19,6)
+            ) AS ValorUnitarioFinal,
+
+            CASE
+                WHEN S.ValorUnitario IS NOT NULL
+                    THEN 'SNAPSHOT'
+
+                WHEN RL.ValorUnitario IS NOT NULL
+                    THEN 'ULTIMO_RECEBIMENTO_CODIGO_LOTE'
+
+                WHEN RC.ValorUnitario IS NOT NULL
+                    THEN 'ULTIMO_RECEBIMENTO_CODIGO'
+
+                ELSE 'SEM_CUSTO'
+            END AS OrigemCusto
+
+        FROM dbo.InventarioEstoqueSnapshot S
+
+        OUTER APPLY
+        (
+            SELECT TOP (1)
+                CAST(
+                    RI.ValorUnitario
+                    AS DECIMAL(19,6)
+                ) AS ValorUnitario
+
+            FROM AlzarsiLog.dbo.RecebimentoItem RI
+
+            INNER JOIN AlzarsiLog.dbo.Recebimento R
+                ON R.Id = RI.RecebimentoId
+
+            WHERE
+                R.CnpjCliente = @CnpjCliente
+
+                AND R.CnpjEstabelecimento =
+                    @CnpjEstabelecimento
+
+                AND R.DataCancelado IS NULL
+
+                AND RI.Conferido = 1
+
+                AND RI.DataConferido IS NOT NULL
+
+                AND RI.DataConferido <= @DataFim
+
+                AND ISNULL(
+                    RI.qArmazenada,
+                    0
+                ) > 0
+
+                AND RI.ValorUnitario IS NOT NULL
+
+                AND LTRIM(RTRIM(RI.CodigoItem))
+                    =
+                    LTRIM(RTRIM(S.Codigo))
+
+                AND LTRIM(
+                    RTRIM(
+                        ISNULL(
+                            RI.CodigoLote,
+                            ''
+                        )
+                    )
+                )
+                    =
+                    LTRIM(
+                        RTRIM(
+                            ISNULL(
+                                S.Lote,
+                                ''
+                            )
+                        )
+                    )
+
+            ORDER BY
+                RI.DataConferido DESC,
+                RI.Id DESC
+        ) RL
+
+        OUTER APPLY
+        (
+            SELECT TOP (1)
+                CAST(
+                    RI.ValorUnitario
+                    AS DECIMAL(19,6)
+                ) AS ValorUnitario
+
+            FROM AlzarsiLog.dbo.RecebimentoItem RI
+
+            INNER JOIN AlzarsiLog.dbo.Recebimento R
+                ON R.Id = RI.RecebimentoId
+
+            WHERE
+                R.CnpjCliente = @CnpjCliente
+
+                AND R.CnpjEstabelecimento =
+                    @CnpjEstabelecimento
+
+                AND R.DataCancelado IS NULL
+
+                AND RI.Conferido = 1
+
+                AND RI.DataConferido IS NOT NULL
+
+                AND RI.DataConferido <= @DataFim
+
+                AND ISNULL(
+                    RI.qArmazenada,
+                    0
+                ) > 0
+
+                AND RI.ValorUnitario IS NOT NULL
+
+                AND LTRIM(RTRIM(RI.CodigoItem))
+                    =
+                    LTRIM(RTRIM(S.Codigo))
+
+            ORDER BY
+                RI.DataConferido DESC,
+                RI.Id DESC
+        ) RC
+
+        WHERE
+            S.ID_Inventario = ?
+
+        ORDER BY
+            S.Codigo,
+            S.Lote,
+            S.ID_Snapshot;
+        """,
+        (
+            cnpj_cliente,
+            cnpj_estabelecimento,
+            data_fim,
+            id_inventario
+        )
+    )
+
+    linhas = cursor.fetchall()
+
+    agrupados = {}
+
+    for linha in linhas:
+        codigo = _normalizar_texto(
+            linha[1]
+        )
+
+        lote = _normalizar_texto(
+            linha[2]
+        )
+
+        quantidade = float(
+            linha[3] or 0
+        )
+
+        valor_unitario = (
+            None
+            if linha[5] is None
+            else float(linha[5])
+        )
+
+        origem = _normalizar_texto(
+            linha[6]
+        ) or "SEM_CUSTO"
+
+        chave = (
+            codigo,
+            lote
+        )
+
+        if chave not in agrupados:
+            agrupados[chave] = {
+                "codigo": codigo,
+                "lote": lote,
+                "quantidade": 0.0,
+                "valor_total_conhecido": 0.0,
+                "custo_referencia": None,
+                "linhas": 0,
+                "linhas_sem_custo": 0,
+                "origens": {
+                    "SNAPSHOT": 0,
+                    "ULTIMO_RECEBIMENTO_CODIGO_LOTE": 0,
+                    "ULTIMO_RECEBIMENTO_CODIGO": 0,
+                    "SEM_CUSTO": 0,
+                },
+            }
+
+        item = agrupados[chave]
+
+        item["quantidade"] += quantidade
+        item["linhas"] += 1
+
+        if origem not in item["origens"]:
+            item["origens"][origem] = 0
+
+        item["origens"][origem] += 1
+
+        if valor_unitario is None:
+            if quantidade != 0:
+                item["linhas_sem_custo"] += 1
+
+            continue
+
+        if item["custo_referencia"] is None:
+            item["custo_referencia"] = (
+                valor_unitario
+            )
+
+        item["valor_total_conhecido"] += (
+            quantidade
+            *
+            valor_unitario
+        )
+
+    itens = []
+
+    total_valor_estoque = 0.0
+    possui_item_sem_custo = False
+
+    itens_snapshot = 0
+    itens_fallback_lote = 0
+    itens_fallback_codigo = 0
+    itens_mistos = 0
+    itens_sem_custo = 0
+
+    for chave in sorted(
+        agrupados.keys()
+    ):
+        item = agrupados[chave]
+
+        quantidade = float(
+            item["quantidade"]
+        )
+
+        linhas_sem_custo = int(
+            item["linhas_sem_custo"]
+        )
+
+        origens_ativas = [
+            origem
+            for origem, total in
+            item["origens"].items()
+            if (
+                total > 0
+                and
+                origem != "SEM_CUSTO"
+            )
+        ]
+
+        if linhas_sem_custo > 0:
+            valor_total = None
+            valor_unitario = None
+            origem_final = "SEM_CUSTO"
+
+            itens_sem_custo += 1
+            possui_item_sem_custo = True
+
+        else:
+            valor_total = float(
+                item["valor_total_conhecido"]
+            )
+
+            if quantidade != 0:
+                valor_unitario = (
+                    valor_total
+                    /
+                    quantidade
+                )
+            else:
+                valor_unitario = (
+                    item["custo_referencia"]
+                )
+
+            if len(origens_ativas) == 1:
+                origem_final = (
+                    origens_ativas[0]
+                )
+            elif len(origens_ativas) > 1:
+                origem_final = "MISTO"
+            else:
+                origem_final = "SEM_CUSTO"
+
+            if origem_final == "SNAPSHOT":
+                itens_snapshot += 1
+
+            elif (
+                origem_final
+                ==
+                "ULTIMO_RECEBIMENTO_CODIGO_LOTE"
+            ):
+                itens_fallback_lote += 1
+
+            elif (
+                origem_final
+                ==
+                "ULTIMO_RECEBIMENTO_CODIGO"
+            ):
+                itens_fallback_codigo += 1
+
+            elif origem_final == "MISTO":
+                itens_mistos += 1
+
+            elif origem_final == "SEM_CUSTO":
+                itens_sem_custo += 1
+                possui_item_sem_custo = True
+
+            if valor_total is not None:
+                total_valor_estoque += (
+                    valor_total
+                )
+
+        itens.append(
+            {
+                "codigo": item["codigo"],
+                "lote": item["lote"],
+                "quantidade": quantidade,
+                "valor_unitario":
+                    valor_unitario,
+                "valor_total":
+                    valor_total,
+                "origem_custo":
+                    origem_final,
+                "linhas":
+                    int(item["linhas"]),
+                "linhas_sem_custo":
+                    linhas_sem_custo,
+                "origens":
+                    item["origens"],
+            }
+        )
+
+    return {
+        "id_inventario":
+            int(id_inventario),
+
+        "cliente_id":
+            int(cliente_id),
+
+        "cliente":
+            cliente,
+
+        "armazem":
+            armazem,
+
+        "data_referencia":
+            data_fim,
+
+        "resumo": {
+            "itens":
+                len(itens),
+
+            "itens_snapshot":
+                itens_snapshot,
+
+            "itens_fallback_codigo_lote":
+                itens_fallback_lote,
+
+            "itens_fallback_codigo":
+                itens_fallback_codigo,
+
+            "itens_mistos":
+                itens_mistos,
+
+            "itens_sem_custo":
+                itens_sem_custo,
+
+            "valor_estoque": (
+                None
+                if possui_item_sem_custo
+                else total_valor_estoque
+            ),
+        },
+
+        "itens":
+            itens,
+    }
+

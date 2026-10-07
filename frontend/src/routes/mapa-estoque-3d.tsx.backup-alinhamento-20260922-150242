@@ -1,0 +1,4259 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { Legend } from "@/components/warehouse/Legend";
+import { SearchBar } from "@/components/warehouse/SearchBar";
+import {
+  DEFAULT_CAMERA,
+  DEFAULT_TARGET,
+  WarehouseScene,
+} from "@/components/warehouse/WarehouseScene";
+import { locationPosition } from "@/components/warehouse/layout";
+import type { WarehouseLocation } from "@/data/warehouseData";
+import { obterInventarioAtual } from "@/lib/inventarioAtual";
+import {
+  buscarMapaEstoqueReal,
+  buscarTop20ArmazemCliente,
+  getDamageArea,
+  getLocations,
+  isDamageAreaQuery,
+  normalizeCode,
+  type WarehouseMapViewType,
+  type WarehouseTop20Detail,
+} from "@/services/warehouseMapService";
+
+export const Route = createFileRoute("/mapa-estoque-3d")({
+  ssr: false,
+  head: () => ({
+    meta: [
+      { title: "Mapa 3D do Estoque — Porta-paletes R01, R02 e R03" },
+      {
+        name: "description",
+        content:
+          "Protótipo interativo do mapa 3D do estoque com 720 posições, 45 módulos, pesquisa de localização e detalhes por posição.",
+      },
+      { property: "og:title", content: "Mapa 3D do Estoque" },
+      {
+        property: "og:description",
+        content:
+          "Visualize o armazém em 3D: ruas R01, R02 e R03, 720 posições, busca e status por posição.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
+  component: MapaEstoque3D,
+});
+
+type Focus = { position: [number, number, number]; target: [number, number, number] } | null;
+
+type FiltroMapa =
+  | "todas"
+  | "estoque"
+  | "livres"
+  | "divergencias"
+  | "recontagem"
+  | "top20";
+
+
+function formatarNumeroEstoque(
+  valor: number,
+) {
+  return valor.toLocaleString(
+    "pt-BR",
+    {
+      maximumFractionDigits: 3,
+    },
+  );
+}
+
+
+function formatarValidadeEstoque(
+  valor: string | null,
+) {
+  if (!valor) {
+    return "?";
+  }
+
+  const correspondencia =
+    valor.match(
+      /^(\d{4})-(\d{2})-(\d{2})/,
+    );
+
+  if (!correspondencia) {
+    return valor;
+  }
+
+  const [, ano, mes, dia] =
+    correspondencia;
+
+  return `${dia}/${mes}/${ano}`;
+}
+
+
+
+function MapaEstoque3D() {
+  const damage = useMemo(() => getDamageArea(), []);
+
+  const [locations, setLocations] =
+    useState<WarehouseLocation[]>([]);
+
+  const [
+    locationsInventario,
+    setLocationsInventario,
+  ] = useState<WarehouseLocation[]>([]);
+
+  const [
+    locationsDivergencia,
+    setLocationsDivergencia,
+  ] = useState<WarehouseLocation[]>([]);
+
+  const [
+    tipoVisualizacao,
+    setTipoVisualizacao,
+  ] = useState<WarehouseMapViewType>(
+    "estoque-atual",
+  );
+
+  const [filtro, setFiltro] =
+    useState<FiltroMapa>("todas");
+
+  const [
+    tipoInventario,
+    setTipoInventario,
+  ] = useState<
+    "ROTATIVO" | "OFICIAL" | null
+  >(null);
+
+
+  const [
+    armazemMapa,
+    setArmazemMapa,
+  ] = useState<string>(
+    "",
+  );
+
+
+  const [
+    localizacoesTop20,
+    setLocalizacoesTop20,
+  ] = useState<string[]>(
+    [],
+  );
+
+
+  const [
+    top20Detalhes,
+    setTop20Detalhes,
+  ] = useState<WarehouseTop20Detail[]>(
+    [],
+  );
+
+
+  const [
+    clienteInventarioId,
+    setClienteInventarioId,
+  ] = useState<number | null>(
+    null,
+  );
+
+
+  const [
+    clienteSelecionado,
+    setClienteSelecionado,
+  ] = useState<string>(
+    "todos",
+  );
+
+  const [carregandoDados, setCarregandoDados] =
+    useState(true);
+
+  const [erroDados, setErroDados] =
+    useState<string | null>(null);
+
+
+  const [
+    avisoDivergencias,
+    setAvisoDivergencias,
+  ] = useState<string | null>(null);
+
+  const [
+    snapshotDisponivel,
+    setSnapshotDisponivel,
+  ] = useState(false);
+
+  const [
+    avisoSnapshot,
+    setAvisoSnapshot,
+  ] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<WarehouseLocation | null>(null);
+
+  const [
+    itensPainelAberto,
+    setItensPainelAberto,
+  ] = useState(false);
+
+
+  const [
+    pesquisaItensPainel,
+    setPesquisaItensPainel,
+  ] = useState("");
+  const [damageSelected, setDamageSelected] = useState(false);
+  const [highlightedCode, setHighlightedCode] = useState<string | null>(null);
+  const [focus, setFocus] = useState<Focus>(null);
+  const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // RESET_ITENS_PAINEL_SELECAO
+  useEffect(() => {
+    setItensPainelAberto(
+      false,
+    );
+
+    setPesquisaItensPainel(
+      "",
+    );
+  }, [
+    selected?.code,
+    tipoVisualizacao,
+  ]);
+
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarEstoqueReal() {
+      const idInventario =
+        obterInventarioAtual();
+
+      if (!idInventario) {
+        if (ativo) {
+          setLocations([]);
+          setArmazemMapa("");
+          setTipoInventario(null);
+          setClienteInventarioId(null);
+          setLocalizacoesTop20([]);
+                  setTop20Detalhes([]);
+
+
+
+          setErroDados(
+            "Selecione um inventário antes de abrir o Mapa 3D.",
+          );
+          setCarregandoDados(false);
+        }
+
+        return;
+      }
+
+      setCarregandoDados(true);
+      setErroDados(null);
+
+      try {
+        const resposta =
+          await buscarMapaEstoqueReal(
+            idInventario,
+          );
+
+        if (!ativo) {
+          return;
+        }
+
+        setArmazemMapa(
+          resposta.armazem,
+        );
+
+        setTipoInventario(
+          resposta.tipoInventario,
+        );
+
+
+        setClienteInventarioId(
+          resposta.clienteInventarioId,
+        );
+        /*
+         * Top 20 do Estoque do Armazem e carregado
+         * pelo cliente selecionado no filtro.
+         */
+        setLocalizacoesTop20([]);
+        setTop20Detalhes([]);
+
+
+
+
+        setLocations(
+          resposta.visoes.estoqueAtual,
+        );
+
+        setLocationsInventario(
+          resposta.visoes.estoqueInventario,
+        );
+
+        setLocationsDivergencia(
+          resposta.visoes.divergencia,
+        );
+
+        setSnapshotDisponivel(
+          resposta.snapshotDisponivel,
+        );
+
+        setAvisoSnapshot(
+          resposta.avisoSnapshot,
+        );
+
+
+        setAvisoDivergencias(
+          resposta.avisoDivergencias,
+        );
+      } catch (erro) {
+        if (!ativo) {
+          return;
+        }
+
+        setLocations([]);
+        setArmazemMapa("");
+        setLocationsInventario([]);
+        setLocationsDivergencia([]);
+        setLocalizacoesTop20([]);
+        setTop20Detalhes([]);
+
+
+        setSnapshotDisponivel(false);
+        setAvisoSnapshot(null);
+        setErroDados(
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar o estoque real.",
+        );
+      } finally {
+        if (ativo) {
+          setCarregandoDados(false);
+        }
+      }
+    }
+
+    void carregarEstoqueReal();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  // TOP20_DINAMICO_CLIENTE_ARMAZEM
+  useEffect(() => {
+    let ativo = true;
+
+    if (
+      tipoVisualizacao !==
+        "estoque-atual" ||
+      clienteSelecionado ===
+        "todos"
+    ) {
+      setLocalizacoesTop20([]);
+      setTop20Detalhes([]);
+
+      return () => {
+        ativo = false;
+      };
+    }
+
+    const clienteId =
+      Number(
+        clienteSelecionado,
+      );
+
+    if (
+      !Number.isInteger(
+        clienteId,
+      ) ||
+      clienteId <= 0 ||
+      !armazemMapa
+    ) {
+      setLocalizacoesTop20([]);
+      setTop20Detalhes([]);
+
+      return () => {
+        ativo = false;
+      };
+    }
+
+    /*
+     * Limpa imediatamente o ranking do cliente anterior
+     * para evitar exibicao de dados cruzados.
+     */
+    setLocalizacoesTop20([]);
+    setTop20Detalhes([]);
+
+    void (
+      async () => {
+        const resposta =
+          await buscarTop20ArmazemCliente(
+            clienteId,
+            armazemMapa,
+            20,
+          );
+
+        if (
+          !ativo
+        ) {
+          return;
+        }
+
+        setLocalizacoesTop20(
+          resposta.localizacoesTop20,
+        );
+
+        setTop20Detalhes(
+          resposta.top20Detalhes,
+        );
+      }
+    )();
+
+    return () => {
+      ativo = false;
+    };
+  }, [
+    armazemMapa,
+    clienteSelecionado,
+    tipoVisualizacao,
+  ]);
+
+
+  const clientesDisponiveis =
+    useMemo(() => {
+      const clientes =
+        new Map<
+          number,
+          string
+        >();
+
+
+      for (
+        const location
+        of locations
+      ) {
+        for (
+          const item
+          of location.itensEstoque ??
+          []
+        ) {
+          clientes.set(
+            item.clienteId,
+            item.cliente,
+          );
+        }
+      }
+
+
+      return Array.from(
+        clientes.entries(),
+      )
+        .map(
+          ([
+            id,
+            nome,
+          ]) => ({
+            id,
+            nome,
+          }),
+        )
+        .sort(
+          (
+            a,
+            b,
+          ) =>
+            a.nome.localeCompare(
+              b.nome,
+              "pt-BR",
+            ),
+        );
+    }, [
+      locations,
+    ]);
+
+
+  const locationsBase =
+    useMemo(() => {
+      if (
+        tipoVisualizacao ===
+        "estoque-inventario"
+      ) {
+        return locationsInventario;
+      }
+
+      if (
+        tipoVisualizacao ===
+        "divergencia"
+      ) {
+        return locationsDivergencia;
+      }
+
+      /*
+       * Estoque do Armazém:
+       * aplica cliente somente nesta visualização.
+       */
+      if (
+        clienteSelecionado ===
+        "todos"
+      ) {
+        return locations;
+      }
+
+
+      const clienteId =
+        Number(
+          clienteSelecionado,
+        );
+
+
+      if (
+        !Number.isInteger(
+          clienteId,
+        )
+      ) {
+        return locations;
+      }
+
+
+      return locations.map(
+        (location) => {
+          const itens =
+            (
+              location.itensEstoque ??
+              []
+            ).filter(
+              (item) =>
+                item.clienteId ===
+                clienteId,
+            );
+
+
+          const quantidade =
+            itens.reduce(
+              (
+                total,
+                item,
+              ) =>
+                total +
+                item.quantidade,
+
+              0,
+            );
+
+
+          const primeiro =
+            itens[0] ??
+            null;
+
+
+          const produtos =
+            new Set(
+              itens
+                .map(
+                  (item) =>
+                    item.descricao?.trim() ||
+                    item.codigo,
+                )
+                .filter(
+                  Boolean,
+                ),
+            );
+
+
+          const lotes =
+            new Set(
+              itens
+                .map(
+                  (item) =>
+                    item.lote?.trim(),
+                )
+                .filter(
+                  (
+                    lote,
+                  ): lote is string =>
+                    Boolean(
+                      lote,
+                    ),
+                ),
+            );
+
+
+          const status:
+            WarehouseLocation["status"] =
+              itens.length === 0
+                ? "livre"
+                : location.status ===
+                    "divergencia" ||
+                  location.status ===
+                    "recontagem"
+                  ? location.status
+                  : "ocupada";
+
+
+          return {
+            ...location,
+
+            quantidade,
+
+            produto:
+              produtos.size === 0
+                ? null
+                : produtos.size === 1
+                  ? (
+                      primeiro?.descricao?.trim() ||
+                      primeiro?.codigo ||
+                      null
+                    )
+                  : `${produtos.size} itens`,
+
+            lote:
+              lotes.size === 0
+                ? null
+                : lotes.size === 1
+                  ? Array.from(
+                      lotes,
+                    )[0] ??
+                    null
+                  : "Múltiplos lotes",
+
+            status,
+
+            itensEstoque:
+              itens,
+          };
+        },
+      );
+    }, [
+      clienteSelecionado,
+      locations,
+      locationsDivergencia,
+      locationsInventario,
+      tipoVisualizacao,
+    ]);
+
+
+  const resumoVisualizacao =
+    useMemo(() => {
+      const ocupadas =
+        locationsBase.filter(
+          (location) =>
+            location.quantidade !== 0 ||
+            location.produto !== null,
+        ).length;
+
+      const divergencias =
+        locationsBase.filter(
+          (location) =>
+            location.status ===
+            "divergencia",
+        ).length;
+
+      const recontagem =
+        locationsBase.filter(
+          (location) =>
+            location.status ===
+            "recontagem",
+        ).length;
+
+      return {
+        ocupadas,
+
+        livres:
+          locationsBase.length -
+          ocupadas,
+
+        divergencias,
+
+        recontagem,
+      };
+    }, [locationsBase]);
+
+
+  const opcoesStatus =
+    useMemo<
+      Array<{
+        value: FiltroMapa;
+        label: string;
+      }>
+    >(() => {
+      /*
+       * ESTOQUE DO ARMAZEM
+       *
+       * O Top 20 pertence ao estoque fisico
+       * do cliente usado no ciclo rotativo.
+       */
+      if (
+        tipoVisualizacao ===
+        "estoque-atual"
+      ) {
+        const opcoes: Array<{
+          value: FiltroMapa;
+          label: string;
+        }> = [
+          {
+            value: "todas",
+            label:
+              "Todas as posi\u00e7\u00f5es",
+          },
+          {
+            value: "estoque",
+            label:
+              "Com estoque",
+          },
+          {
+            value: "livres",
+            label:
+              "Posi\u00e7\u00f5es livres",
+          },
+        ];
+
+        const clienteId =
+          Number(
+            clienteSelecionado,
+          );
+
+        const top20Permitido =
+          Number.isInteger(
+            clienteId,
+          ) &&
+          clienteId > 0 &&
+          localizacoesTop20.length >
+            0;
+
+        if (
+          top20Permitido
+        ) {
+          opcoes.push({
+            value:
+              "top20",
+            label:
+              "Top 20 priorizadas",
+          });
+        }
+
+        return opcoes;
+      }
+
+
+      /*
+       * ESTOQUE DO INVENTARIO
+       *
+       * Top 20 nao pertence a esta visao.
+       */
+      if (
+        tipoVisualizacao ===
+        "estoque-inventario"
+      ) {
+        if (
+          tipoInventario ===
+          "ROTATIVO"
+        ) {
+          return [
+            {
+              value:
+                "estoque",
+              label:
+                "Localiza\u00e7\u00f5es do invent\u00e1rio",
+            },
+            {
+              value:
+                "divergencias",
+              label:
+                "Com diverg\u00eancia",
+            },
+          ];
+        }
+
+        return [
+          {
+            value:
+              "estoque",
+            label:
+              "Localiza\u00e7\u00f5es do invent\u00e1rio",
+          },
+        ];
+      }
+
+
+      /*
+       * VISAO DE DIVERGENCIAS
+       */
+      return [
+        {
+          value: "todas",
+          label:
+            "Todas as pend\u00eancias",
+        },
+        {
+          value:
+            "divergencias",
+          label:
+            "Com diverg\u00eancia",
+        },
+        {
+          value:
+            "recontagem",
+          label:
+            "Em recontagem",
+        },
+      ];
+    }, [
+      clienteSelecionado,
+      localizacoesTop20.length,
+      tipoInventario,
+      tipoVisualizacao,
+    ]);
+
+
+  // NORMALIZAR_FILTRO_MAPA_INVENTARIO
+  useEffect(() => {
+    /*
+     * ESTOQUE DO INVENTARIO
+     */
+    if (
+      tipoVisualizacao ===
+      "estoque-inventario"
+    ) {
+      if (
+        tipoInventario ===
+        "ROTATIVO"
+      ) {
+        if (
+          filtro ===
+            "estoque" ||
+          filtro ===
+            "divergencias"
+        ) {
+          return;
+        }
+      }
+
+      if (
+        filtro !==
+        "estoque"
+      ) {
+        setFiltro(
+          "estoque",
+        );
+      }
+
+      return;
+    }
+
+
+    /*
+     * ESTOQUE DO ARMAZEM
+     */
+    if (
+      tipoVisualizacao ===
+      "estoque-atual"
+    ) {
+      const clienteId =
+        Number(
+          clienteSelecionado,
+        );
+
+      const top20Permitido =
+          Number.isInteger(
+            clienteId,
+          ) &&
+          clienteId > 0 &&
+          localizacoesTop20.length >
+            0;
+
+      if (
+        filtro ===
+          "top20"
+      ) {
+        if (
+          top20Permitido
+        ) {
+          return;
+        }
+
+        setFiltro(
+          "todas",
+        );
+
+        return;
+      }
+
+      if (
+        filtro ===
+          "todas" ||
+        filtro ===
+          "estoque" ||
+        filtro ===
+          "livres"
+      ) {
+        return;
+      }
+
+      setFiltro(
+        "todas",
+      );
+
+      return;
+    }
+
+
+    /*
+     * VISAO DE DIVERGENCIAS
+     */
+    if (
+      filtro ===
+        "todas" ||
+      filtro ===
+        "divergencias" ||
+      filtro ===
+        "recontagem"
+    ) {
+      return;
+    }
+
+    setFiltro(
+      "todas",
+    );
+  }, [
+    clienteSelecionado,
+    filtro,
+    localizacoesTop20.length,
+    tipoInventario,
+    tipoVisualizacao,
+  ]);
+
+
+  const localizacoesTop20Set =
+    useMemo(
+      () =>
+        new Set(
+          localizacoesTop20.map(
+            (
+              localizacao,
+            ) =>
+              normalizeCode(
+                localizacao,
+              ),
+          ),
+        ),
+      [
+        localizacoesTop20,
+      ],
+    );
+
+
+  const locationsVisiveis =
+    useMemo(() => {
+      if (
+        filtro ===
+        "top20"
+      ) {
+        return locationsBase.filter(
+          (
+            location,
+          ) =>
+            localizacoesTop20Set.has(
+              normalizeCode(
+                location.code,
+              ),
+            ),
+        );
+      }
+
+
+      if (
+        filtro ===
+        "estoque"
+      ) {
+        return locationsBase.filter(
+          (
+            location,
+          ) =>
+            location.quantidade !==
+              0 ||
+            location.produto !==
+              null,
+        );
+      }
+
+
+      if (
+        filtro ===
+        "livres"
+      ) {
+        return locationsBase.filter(
+          (
+            location,
+          ) =>
+            location.quantidade ===
+              0 &&
+            location.produto ===
+              null,
+        );
+      }
+
+
+      if (
+        filtro ===
+        "divergencias"
+      ) {
+        return locationsBase.filter(
+          (
+            location,
+          ) =>
+            location.status ===
+            "divergencia",
+        );
+      }
+
+
+      if (
+        filtro ===
+        "recontagem"
+      ) {
+        return locationsBase.filter(
+          (
+            location,
+          ) =>
+            location.status ===
+            "recontagem",
+        );
+      }
+
+
+      return locationsBase;
+    }, [
+      filtro,
+      localizacoesTop20Set,
+      locationsBase,
+    ]);
+
+
+  const itensPainelFiltrados =
+    useMemo(() => {
+      const itens =
+        selected?.itensEstoque ??
+        [];
+
+      const pesquisa =
+        pesquisaItensPainel
+          .trim()
+          .toLocaleLowerCase(
+            "pt-BR",
+          );
+
+      if (!pesquisa) {
+        return itens;
+      }
+
+      return itens.filter(
+        (item) => {
+          const campos = [
+            item.codigo,
+            item.descricao ?? "",
+            item.lote ?? "",
+            item.cliente,
+            item.unidade ?? "",
+            item.categoria ?? "",
+            item.statusEstoque ?? "",
+            item.tipoLocalizacao ?? "",
+          ];
+
+          return campos.some(
+            (campo) =>
+              campo
+                .toLocaleLowerCase(
+                  "pt-BR",
+                )
+                .includes(
+                  pesquisa,
+                ),
+          );
+        },
+      );
+    }, [
+      pesquisaItensPainel,
+      selected,
+    ]);
+
+
+  const itensContadosPainelFiltrados =
+    useMemo(() => {
+      const itens =
+        selected?.itensContados ??
+        [];
+
+      const pesquisa =
+        pesquisaItensPainel
+          .trim()
+          .toLocaleLowerCase(
+            "pt-BR",
+          );
+
+      if (!pesquisa) {
+        return itens;
+      }
+
+      return itens.filter(
+        (item) => {
+          const campos = [
+            item.codigo,
+            item.descricao ?? "",
+            item.lote ?? "",
+            item.status,
+          ];
+
+          return campos.some(
+            (campo) =>
+              campo
+                .toLocaleLowerCase(
+                  "pt-BR",
+                )
+                .includes(
+                  pesquisa,
+                ),
+          );
+        },
+      );
+    }, [
+      pesquisaItensPainel,
+      selected,
+    ]);
+
+
+  const resumoOperacionalEstoqueSelecionado =
+    useMemo(() => {
+      const itens =
+        selected?.itensEstoque ??
+        [];
+
+      return itens.reduce(
+        (
+          resumo,
+          item,
+        ) => ({
+          fisico:
+            resumo.fisico +
+            item.quantidade,
+
+          reservado:
+            resumo.reservado +
+            item.reservado,
+
+          bloqueado:
+            resumo.bloqueado +
+            item.bloqueado,
+
+          disponivel:
+            resumo.disponivel +
+            item.disponivel,
+        }),
+        {
+          fisico: 0,
+          reservado: 0,
+          bloqueado: 0,
+          disponivel: 0,
+        },
+      );
+    }, [
+      selected,
+    ]);
+
+
+  const top20Selecionado =
+    useMemo(() => {
+      /*
+       * O ranking pertence ao Estoque do Armazem
+       * e ao cliente atualmente selecionado.
+       *
+       * top20Detalhes ja e recarregado dinamicamente
+       * quando cliente/armazem mudam.
+       */
+      if (
+        !selected ||
+        tipoVisualizacao !==
+          "estoque-atual" ||
+        clienteSelecionado ===
+          "todos"
+      ) {
+        return null;
+      }
+
+      const codigoSelecionado =
+        normalizeCode(
+          selected.code,
+        );
+
+      return (
+        top20Detalhes.find(
+          (
+            item,
+          ) =>
+            normalizeCode(
+              item.localizacao,
+            ) ===
+            codigoSelecionado,
+        ) ??
+        null
+      );
+    }, [
+      clienteSelecionado,
+      selected,
+      tipoVisualizacao,
+      top20Detalhes,
+    ]);
+
+
+  const resumoContagemSelecionada =
+    useMemo(() => {
+      const itens =
+        selected?.itensContados ??
+        [];
+
+      const possuiContagem =
+        itens.length > 0;
+
+      const esperado =
+        tipoVisualizacao ===
+          "estoque-inventario"
+          ? selected?.quantidade ??
+            0
+          : 0;
+
+      const contado =
+        itens.reduce(
+          (
+            total,
+            item,
+          ) =>
+            total +
+            item.quantidade,
+          0,
+        );
+
+      const skus =
+        new Set(
+          itens
+            .map(
+              (item) =>
+                item.codigo
+                  .trim()
+                  .toUpperCase(),
+            )
+            .filter(
+              Boolean,
+            ),
+        ).size;
+
+      const lotes =
+        new Set(
+          itens
+            .map(
+              (item) =>
+                item.lote
+                  ?.trim()
+                  .toUpperCase(),
+            )
+            .filter(
+              (
+                lote,
+              ): lote is string =>
+                Boolean(
+                  lote,
+                ),
+            ),
+        ).size;
+
+      return {
+        possuiContagem,
+        esperado,
+        contado,
+        diferenca:
+          contado -
+          esperado,
+        skus,
+        lotes,
+        registros:
+          itens.length,
+      };
+    }, [
+      selected,
+      tipoVisualizacao,
+    ]);
+
+
+  const focusOn = useCallback((l: WarehouseLocation) => {
+    const [x, y, z] = locationPosition(l);
+
+    /*
+     * Aproxima a camera pela frente operacional
+     * da posicao, voltada para o corredor.
+     *
+     * O sentido anterior estava invertido e
+     * fazia a camera enquadrar as costas da carga.
+     */
+    const side =
+      l.lado === "impar"
+        ? -1
+        : 1;
+
+    setFocus({
+      position: [
+        x + 4,
+        y + 4.5,
+        z + 9 * side,
+      ],
+      target: [
+        x,
+        y,
+        z,
+      ],
+    });
+  }, []);
+
+  const handleSelect = useCallback((l: WarehouseLocation) => {
+    setSelected(l);
+    setDamageSelected(false);
+    setHighlightedCode(l.code);
+    setFeedback(null);
+  }, []);
+
+  const handleClear = useCallback(() => {
+    setSelected(null);
+    setDamageSelected(false);
+    setHighlightedCode(null);
+  }, []);
+
+  const handleSearch = useCallback(
+    (query: string) => {
+      if (isDamageAreaQuery(query)) {
+        setSelected(null);
+        setHighlightedCode(null);
+        setDamageSelected(true);
+        setFeedback({ ok: true, message: "Área de avaria R02AVARIA selecionada." });
+        return;
+      }
+      const codigo =
+        normalizeCode(query);
+
+      const found =
+        locationsBase.find(
+          (location) =>
+            location.code === codigo,
+        ) ?? null;
+      if (!found) {
+        setFeedback({ ok: false, message: `Localização não encontrada: ${query}` });
+        return;
+      }
+      setSelected(found);
+      setDamageSelected(false);
+      setHighlightedCode(found.code);
+      focusOn(found);
+      setFeedback({ ok: true, message: `Localização ${found.code} encontrada e destacada.` });
+    },
+    [
+      focusOn,
+      locationsBase,
+    ],
+  );
+
+  const resetCamera = useCallback(() => {
+    setFocus({ position: [...DEFAULT_CAMERA], target: [...DEFAULT_TARGET] });
+  }, []);
+
+  return (
+    <main className="min-h-0 bg-background px-2 pt-1.5 pb-0 lg:px-3">
+
+
+      <div className="mb-4 space-y-3">
+
+
+        {carregandoDados ? (
+          <div className="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+            Carregando estoque real...
+          </div>
+        ) : null}
+
+        {erroDados ? (
+          <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {erroDados}
+          </div>
+        ) : null}
+
+        {avisoDivergencias ? (
+          <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
+            Estoque real carregado, mas as divergências não estão disponíveis: {avisoDivergencias}
+          </div>
+        ) : null}
+
+
+      </div>
+
+      <div className="w-full">
+        <div className="min-w-0">
+          <div
+            className="
+              relative
+              h-[560px]
+              overflow-hidden
+              rounded-2xl
+              border
+              border-border
+              bg-muted
+              shadow-sm
+              md:h-[calc(100dvh-92px)]
+              xl:h-[calc(100dvh-92px)]
+              xl:min-h-0
+            "
+          >
+            <WarehouseScene
+              locations={locationsVisiveis}
+              showFreeMarkers={
+                tipoVisualizacao ===
+                  "estoque-atual" &&
+                filtro ===
+                  "livres"
+              }
+              selected={selected}
+              highlightedCode={highlightedCode}
+              damageLabel={damage.label}
+              damageSelected={damageSelected}
+              cameraFocus={focus}
+              onSelect={handleSelect}
+              onSelectDamage={() => {
+                setDamageSelected(true);
+                setSelected(null);
+                setHighlightedCode(null);
+              }}
+              onClear={handleClear}
+            />
+
+
+            {/*
+             * ==================================================
+             * PAINEL DE DETALHES DA POSICAO
+             * ==================================================
+             *
+             * Estoque do Armazem:
+             * detalha todos os registros fisicos da posicao.
+             *
+             * Estoque do Inventario:
+             * mantem o resumo do snapshot.
+             *
+             * Somente leitura.
+             */}
+            {selected &&
+            (
+              tipoVisualizacao ===
+                "estoque-atual" ||
+              tipoVisualizacao ===
+                "estoque-inventario"
+            ) ? (
+              <div
+                className="
+                  pointer-events-auto
+                  absolute
+                  right-3
+                  top-3
+                  z-30
+                  w-[390px]
+                  max-w-[calc(100%-24px)]
+                  overflow-hidden
+                  rounded-xl
+                  border
+                  border-border/40
+                  bg-background/95
+                  shadow-xl
+                  backdrop-blur-md
+                "
+              >
+                {/* Cabecalho */}
+                <div
+                  className="
+                    flex
+                    items-start
+                    justify-between
+                    gap-3
+                    border-b
+                    border-border/40
+                    px-4
+                    py-3
+                  "
+                >
+                  <div className="min-w-0">
+                    <p
+                      className="
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-[0.16em]
+                        text-muted-foreground
+                      "
+                    >
+                      {tipoVisualizacao ===
+                      "estoque-atual"
+                        ? "Estoque do Armaz\u00e9m"
+                        : "Estoque do Invent\u00e1rio"}
+                    </p>
+
+                    <h3
+                      className="
+                        mt-1
+                        truncate
+                        text-base
+                        font-bold
+                        text-foreground
+                      "
+                    >
+                      {selected.code}
+                    </h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={
+                      handleClear
+                    }
+                    className="
+                      flex
+                      h-8
+                      w-8
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-lg
+                      border
+                      border-border/40
+                      bg-background
+                      text-sm
+                      font-semibold
+                      text-muted-foreground
+                      transition
+                      hover:bg-muted
+                      hover:text-foreground
+                    "
+                    aria-label="Fechar detalhes"
+                    title="Fechar"
+                  >
+                    X
+                  </button>
+                </div>
+
+
+                <div
+                  className="
+                    max-h-[calc(100vh-220px)]
+                    overflow-y-auto
+                    p-4
+                  "
+                >
+                  {/* Status */}
+                  <div
+                    className="
+                      mb-4
+                      flex
+                      items-center
+                      justify-between
+                      gap-3
+                    "
+                  >
+                    <span
+                      className="
+                        text-xs
+                        font-medium
+                        text-muted-foreground
+                      "
+                    >
+                      Status
+                    </span>
+
+                    <span
+                      className={`
+                        inline-flex
+                        items-center
+                        rounded-full
+                        border
+                        px-2.5
+                        py-1
+                        text-[11px]
+                        font-semibold
+                        ${
+                          tipoVisualizacao ===
+                          "estoque-atual"
+                            ? (
+                                (
+                                  selected
+                                    .itensEstoque ??
+                                  []
+                                ).length >
+                                0
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600"
+                              )
+                            : selected.status ===
+                                "divergencia"
+                              ? "border-red-200 bg-red-50 text-red-700"
+                              : selected.status ===
+                                  "recontagem"
+                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                : selected.status ===
+                                    "ocupada"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600"
+                        }
+                      `}
+                    >
+                      {tipoVisualizacao ===
+                      "estoque-atual"
+                        ? (
+                            (
+                              selected
+                                .itensEstoque ??
+                              []
+                            ).length >
+                            0
+                              ? "Com estoque"
+                              : "Livre"
+                          )
+                        : selected.status ===
+                            "divergencia"
+                          ? "Diverg\u00eancia"
+                          : selected.status ===
+                              "recontagem"
+                            ? "Recontagem"
+                            : selected.status ===
+                                "ocupada"
+                              ? "Com estoque"
+                              : "Livre"}
+                    </span>
+                  </div>
+
+
+                  {/*
+                   * ============================================
+                   * ESTOQUE DO ARMAZEM
+                   * ============================================
+                   */}
+                  {tipoVisualizacao ===
+                  "estoque-atual" ? (
+                    <>
+                      {/* DETALHE_TOP20_POSICAO */}
+                      {top20Selecionado ? (
+                        <div
+                          className="
+                            mb-4
+                            rounded-lg
+                            border
+                            border-border/50
+                            bg-muted/20
+                            p-3
+                          "
+                        >
+                          <div
+                            className="
+                              flex
+                              items-start
+                              justify-between
+                              gap-3
+                            "
+                          >
+                            <div>
+                              <p
+                                className="
+                                  text-[10px]
+                                  font-semibold
+                                  uppercase
+                                  tracking-[0.14em]
+                                  text-muted-foreground
+                                "
+                              >
+                                Prioridade Top 20
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  font-semibold
+                                  text-foreground
+                                "
+                              >
+                                Localiza&ccedil;&atilde;o priorizada
+                                pelo ciclo rotativo
+                              </p>
+                            </div>
+
+
+                            <div
+                              className="
+                                shrink-0
+                                rounded-md
+                                border
+                                border-border/50
+                                bg-background
+                                px-2.5
+                                py-1.5
+                                text-sm
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              #{top20Selecionado.ordem}
+                            </div>
+                          </div>
+
+
+                          <div
+                            className="
+                              mt-3
+                              grid
+                              grid-cols-2
+                              gap-2
+                            "
+                          >
+                            <div
+                              className="
+                                rounded-md
+                                border
+                                border-border/40
+                                bg-background/60
+                                p-2.5
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[10px]
+                                  uppercase
+                                  tracking-wide
+                                  text-muted-foreground
+                                "
+                              >
+                                Classifica&ccedil;&atilde;o
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  font-semibold
+                                  text-foreground
+                                "
+                              >
+                                {top20Selecionado
+                                  .classificacaoRisco ??
+                                  "N&atilde;o informada"}
+                              </p>
+                            </div>
+
+
+                            <div
+                              className="
+                                rounded-md
+                                border
+                                border-border/40
+                                bg-background/60
+                                p-2.5
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[10px]
+                                  uppercase
+                                  tracking-wide
+                                  text-muted-foreground
+                                "
+                              >
+                                Score de risco
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  font-semibold
+                                  tabular-nums
+                                  text-foreground
+                                "
+                              >
+                                {top20Selecionado
+                                  .scoreRisco !==
+                                null
+                                  ? top20Selecionado
+                                      .scoreRisco
+                                      .toLocaleString(
+                                        "pt-BR",
+                                        {
+                                          maximumFractionDigits:
+                                            2,
+                                        },
+                                      )
+                                  : "\u2014"}
+                              </p>
+                            </div>
+
+
+                            <div
+                              className="
+                                rounded-md
+                                border
+                                border-border/40
+                                bg-background/60
+                                p-2.5
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[10px]
+                                  uppercase
+                                  tracking-wide
+                                  text-muted-foreground
+                                "
+                              >
+                                Prioridade
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  font-semibold
+                                  tabular-nums
+                                  text-foreground
+                                "
+                              >
+                                {top20Selecionado
+                                  .prioridade ??
+                                  "\u2014"}
+                              </p>
+                            </div>
+
+
+                            <div
+                              className="
+                                rounded-md
+                                border
+                                border-border/40
+                                bg-background/60
+                                p-2.5
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[10px]
+                                  uppercase
+                                  tracking-wide
+                                  text-muted-foreground
+                                "
+                              >
+                                Tipo de sugest&atilde;o
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  break-words
+                                  text-sm
+                                  font-semibold
+                                  text-foreground
+                                "
+                              >
+                                {top20Selecionado
+                                  .tipoSugestao ??
+                                  "N&atilde;o informado"}
+                              </p>
+                            </div>
+                          </div>
+
+
+                          <div
+                            className="
+                              mt-2
+                              rounded-md
+                              border
+                              border-border/40
+                              bg-background/60
+                              p-2.5
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Motivo principal
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                break-words
+                                text-xs
+                                font-medium
+                                leading-5
+                                text-foreground
+                              "
+                            >
+                              {top20Selecionado
+                                .motivoPrincipal ??
+                                "Motivo n&atilde;o informado."}
+                            </p>
+                          </div>
+
+
+                          <div
+                            className="
+                              mt-2
+                              flex
+                              items-center
+                              justify-between
+                              gap-3
+                              rounded-md
+                              border
+                              border-border/40
+                              bg-background/60
+                              px-2.5
+                              py-2
+                            "
+                          >
+                            <span
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              &Uacute;ltima contagem
+                            </span>
+
+                            <span
+                              className="
+                                text-right
+                                text-xs
+                                font-semibold
+                                text-foreground
+                              "
+                            >
+                              {top20Selecionado
+                                .ultimaContagem
+                                ? new Date(
+                                    top20Selecionado
+                                      .ultimaContagem,
+                                  ).toLocaleString(
+                                    "pt-BR",
+                                  )
+                                : "Sem registro"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+
+
+
+                      {/* RESUMO_OPERACIONAL_ESTOQUE */}
+                      <div
+                        className="
+                          mb-3
+                          rounded-lg
+                          border
+                          border-border/50
+                          bg-muted/20
+                          p-3
+                        "
+                      >
+                        <div>
+                          <p
+                            className="
+                              text-[10px]
+                              font-semibold
+                              uppercase
+                              tracking-[0.14em]
+                              text-muted-foreground
+                            "
+                          >
+                            Saldo da posi&ccedil;&atilde;o
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              text-xs
+                              text-muted-foreground
+                            "
+                          >
+                            Disponibilidade atual do estoque
+                          </p>
+                        </div>
+
+
+                        <div
+                          className="
+                            mt-3
+                            grid
+                            grid-cols-2
+                            gap-2
+                          "
+                        >
+                          <div
+                            className="
+                              rounded-md
+                              border
+                              bg-background/70
+                              p-2.5
+                            "
+                          >
+                            <div
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              F&iacute;sico
+                            </div>
+
+                            <div
+                              className="
+                                mt-1
+                                text-sm
+                                font-semibold
+                                tabular-nums
+                              "
+                            >
+                              {resumoOperacionalEstoqueSelecionado
+                                .fisico
+                                .toLocaleString(
+                                  "pt-BR",
+                                  {
+                                    maximumFractionDigits:
+                                      3,
+                                  },
+                                )}
+                            </div>
+                          </div>
+
+
+                          <div
+                            className="
+                              rounded-md
+                              border
+                              bg-background/70
+                              p-2.5
+                            "
+                          >
+                            <div
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Reservado
+                            </div>
+
+                            <div
+                              className="
+                                mt-1
+                                text-sm
+                                font-semibold
+                                tabular-nums
+                              "
+                            >
+                              {resumoOperacionalEstoqueSelecionado
+                                .reservado
+                                .toLocaleString(
+                                  "pt-BR",
+                                  {
+                                    maximumFractionDigits:
+                                      3,
+                                  },
+                                )}
+                            </div>
+                          </div>
+
+
+                          <div
+                            className="
+                              rounded-md
+                              border
+                              bg-background/70
+                              p-2.5
+                            "
+                          >
+                            <div
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Bloqueado
+                            </div>
+
+                            <div
+                              className="
+                                mt-1
+                                text-sm
+                                font-semibold
+                                tabular-nums
+                              "
+                            >
+                              {resumoOperacionalEstoqueSelecionado
+                                .bloqueado
+                                .toLocaleString(
+                                  "pt-BR",
+                                  {
+                                    maximumFractionDigits:
+                                      3,
+                                  },
+                                )}
+                            </div>
+                          </div>
+
+
+                          <div
+                            className="
+                              rounded-md
+                              border
+                              bg-background/70
+                              p-2.5
+                            "
+                          >
+                            <div
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Dispon&iacute;vel
+                            </div>
+
+                            <div
+                              className="
+                                mt-1
+                                text-sm
+                                font-semibold
+                                tabular-nums
+                              "
+                            >
+                              {resumoOperacionalEstoqueSelecionado
+                                .disponivel
+                                .toLocaleString(
+                                  "pt-BR",
+                                  {
+                                    maximumFractionDigits:
+                                      3,
+                                  },
+                                )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+
+                      {/* Resumo do pallet */}
+                      <div
+                        className="
+                          grid
+                          grid-cols-2
+                          gap-2
+                        "
+                      >
+                        {/* SKUs distintos */}
+                        <div
+                          className="
+                            rounded-lg
+                            border
+                            border-border/40
+                            bg-muted/20
+                            p-3
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              uppercase
+                              tracking-wide
+                              text-muted-foreground
+                            "
+                          >
+                            SKUs
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              text-lg
+                              font-bold
+                              tabular-nums
+                              text-foreground
+                            "
+                          >
+                            {
+                              new Set(
+                                (
+                                  selected
+                                    .itensEstoque ??
+                                  []
+                                )
+                                  .map(
+                                    (
+                                      item,
+                                    ) =>
+                                      item.codigo
+                                        .trim()
+                                        .toUpperCase(),
+                                  )
+                                  .filter(
+                                    Boolean,
+                                  ),
+                              ).size
+                            }
+                          </p>
+                        </div>
+
+
+                        {/* Lotes distintos */}
+                        <div
+                          className="
+                            rounded-lg
+                            border
+                            border-border/40
+                            bg-muted/20
+                            p-3
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              uppercase
+                              tracking-wide
+                              text-muted-foreground
+                            "
+                          >
+                            Lotes
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              text-lg
+                              font-bold
+                              tabular-nums
+                              text-foreground
+                            "
+                          >
+                            {
+                              new Set(
+                                (
+                                  selected
+                                    .itensEstoque ??
+                                  []
+                                )
+                                  .map(
+                                    (
+                                      item,
+                                    ) =>
+                                      item.lote
+                                        ?.trim()
+                                        .toUpperCase(),
+                                  )
+                                  .filter(
+                                    (
+                                      lote,
+                                    ): lote is string =>
+                                      Boolean(
+                                        lote,
+                                      ),
+                                  ),
+                              ).size
+                            }
+                          </p>
+                        </div>
+
+
+                        {/* Quantidade total */}
+                        <div
+                          className="
+                            rounded-lg
+                            border
+                            border-border/40
+                            bg-muted/20
+                            p-3
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              uppercase
+                              tracking-wide
+                              text-muted-foreground
+                            "
+                          >
+                            Quantidade
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              text-lg
+                              font-bold
+                              tabular-nums
+                              text-foreground
+                            "
+                          >
+                            {selected.quantidade.toLocaleString(
+                              "pt-BR",
+                            )}
+                          </p>
+                        </div>
+
+
+                        {/* Clientes distintos */}
+                        <div
+                          className="
+                            rounded-lg
+                            border
+                            border-border/40
+                            bg-muted/20
+                            p-3
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              uppercase
+                              tracking-wide
+                              text-muted-foreground
+                            "
+                          >
+                            Clientes
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              text-lg
+                              font-bold
+                              tabular-nums
+                              text-foreground
+                            "
+                          >
+                            {
+                              new Set(
+                                (
+                                  selected
+                                    .itensEstoque ??
+                                  []
+                                ).map(
+                                  (
+                                    item,
+                                  ) =>
+                                    item.clienteId,
+                                ),
+                              ).size
+                            }
+                          </p>
+                        </div>
+                      </div>
+
+
+                      {/* Conteudo da posicao */}
+                      <div className="mt-4">
+                        <div
+                          className="
+                            flex
+                            items-center
+                            justify-between
+                            gap-3
+                          "
+                        >
+                          <div>
+                            <p
+                              className="
+                                text-[10px]
+                                font-semibold
+                                uppercase
+                                tracking-[0.14em]
+                                text-muted-foreground
+                              "
+                            >
+                              Itens na posi&ccedil;&atilde;o
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-xs
+                                text-muted-foreground
+                              "
+                            >
+                              {(
+                                selected
+                                  .itensEstoque ??
+                                []
+                              ).length ===
+                              0
+                                ? "Nenhum item armazenado"
+                                : `${(
+                                    selected
+                                      .itensEstoque ??
+                                    []
+                                  ).length} registro(s) armazenado(s)`}
+                            </p>
+                          </div>
+
+
+                          {(
+                            selected
+                              .itensEstoque ??
+                            []
+                          ).length >
+                          0 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setItensPainelAberto(
+                                  (
+                                    atual,
+                                  ) =>
+                                    !atual,
+                                );
+                              }}
+                              className="
+                                shrink-0
+                                rounded-lg
+                                border
+                                border-border/50
+                                bg-background
+                                px-3
+                                py-2
+                                text-xs
+                                font-semibold
+                                text-foreground
+                                transition
+                                hover:bg-muted
+                              "
+                            >
+                              {itensPainelAberto
+                                ? "Ocultar itens"
+                                : `Ver ${(
+                                    selected
+                                      .itensEstoque ??
+                                    []
+                                  ).length} itens`}
+                            </button>
+                          ) : null}
+                        </div>
+
+
+                        {(
+                          selected
+                            .itensEstoque ??
+                          []
+                        ).length ===
+                        0 ? (
+                          <div
+                            className="
+                              mt-3
+                              rounded-lg
+                              border
+                              border-dashed
+                              border-border/60
+                              bg-muted/10
+                              px-3
+                              py-4
+                              text-center
+                            "
+                          >
+                            <p
+                              className="
+                                text-sm
+                                font-medium
+                                text-muted-foreground
+                              "
+                            >
+                              Nenhum item armazenado nesta
+                              posi&ccedil;&atilde;o.
+                            </p>
+                          </div>
+                        ) : null}
+
+
+                        {itensPainelAberto &&
+                        (
+                          selected
+                            .itensEstoque ??
+                          []
+                        ).length >
+                          0 ? (
+                          <div className="mt-3">
+                            <input
+                              type="search"
+                              value={
+                                pesquisaItensPainel
+                              }
+                              onChange={(
+                                evento,
+                              ) => {
+                                setPesquisaItensPainel(
+                                  evento.target
+                                    .value,
+                                );
+                              }}
+                              placeholder={
+                                "Buscar por c\u00f3digo, produto, lote ou cliente..."
+                              }
+                              className="
+                                h-10
+                                w-full
+                                rounded-lg
+                                border
+                                border-input
+                                bg-background
+                                px-3
+                                text-sm
+                                text-foreground
+                                outline-none
+                                transition
+                                placeholder:text-muted-foreground
+                                focus:ring-2
+                                focus:ring-ring
+                              "
+                            />
+
+                            <div
+                              className="
+                                mt-2
+                                flex
+                                items-center
+                                justify-between
+                                gap-3
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[11px]
+                                  text-muted-foreground
+                                "
+                              >
+                                Exibindo{" "}
+                                <span className="font-semibold text-foreground">
+                                  {
+                                    itensPainelFiltrados.length
+                                  }
+                                </span>{" "}
+                                de{" "}
+                                <span className="font-semibold text-foreground">
+                                  {
+                                    (
+                                      selected
+                                        .itensEstoque ??
+                                      []
+                                    ).length
+                                  }
+                                </span>
+                              </p>
+
+                              {pesquisaItensPainel ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPesquisaItensPainel(
+                                      "",
+                                    );
+                                  }}
+                                  className="
+                                    text-[11px]
+                                    font-semibold
+                                    text-primary
+                                    hover:underline
+                                  "
+                                >
+                                  Limpar
+                                </button>
+                              ) : null}
+                            </div>
+
+
+                            {itensPainelFiltrados.length ===
+                            0 ? (
+                              <div
+                                className="
+                                  mt-3
+                                  rounded-lg
+                                  border
+                                  border-dashed
+                                  border-border/60
+                                  bg-muted/10
+                                  px-3
+                                  py-5
+                                  text-center
+                                "
+                              >
+                                <p
+                                  className="
+                                    text-sm
+                                    font-medium
+                                    text-muted-foreground
+                                  "
+                                >
+                                  Nenhum item encontrado.
+                                </p>
+                              </div>
+                            ) : (
+                          <div
+                            className="
+                              mt-3
+                              max-h-[310px]
+                              space-y-2
+                              overflow-y-auto
+                              pr-1
+                            "
+                          >
+{itensPainelFiltrados.map(
+                              (
+                                item,
+                                index,
+                              ) => (
+                                <div
+                                  key={`${item.clienteId}-${item.codigo}-${item.lote ?? "sem-lote"}-${index}`}
+                                  className="
+                                    rounded-lg
+                                    border
+                                    border-border/40
+                                    bg-muted/15
+                                    p-3
+                                  "
+                                >
+                                  {/* DETALHE_OPERACIONAL_ITEM_ESTOQUE */}
+                                  <div
+                                    className="
+                                      flex
+                                      items-start
+                                      justify-between
+                                      gap-3
+                                    "
+                                  >
+                                    <div className="min-w-0">
+                                      <p
+                                        className="
+                                          text-[10px]
+                                          font-semibold
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        C&oacute;digo
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          break-all
+                                          text-sm
+                                          font-bold
+                                          text-foreground
+                                        "
+                                      >
+                                        {item.codigo}
+                                      </p>
+                                    </div>
+
+                                    {item.statusEstoque ? (
+                                      <span
+                                        className="
+                                          max-w-[140px]
+                                          truncate
+                                          rounded-md
+                                          border
+                                          bg-background
+                                          px-2
+                                          py-1
+                                          text-[10px]
+                                          font-semibold
+                                          text-muted-foreground
+                                        "
+                                        title={
+                                          item.statusEstoque
+                                        }
+                                      >
+                                        {item.statusEstoque}
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+
+                                  <div className="mt-2">
+                                    <p
+                                      className="
+                                        text-[10px]
+                                        uppercase
+                                        tracking-wide
+                                        text-muted-foreground
+                                      "
+                                    >
+                                      Produto
+                                    </p>
+
+                                    <p
+                                      className="
+                                        mt-0.5
+                                        break-words
+                                        text-xs
+                                        font-medium
+                                        leading-5
+                                        text-foreground
+                                      "
+                                    >
+                                      {item.descricao?.trim() ||
+                                        "Produto sem descri??o"}
+                                    </p>
+                                  </div>
+
+
+                                  {/* SALDOS DO ITEM */}
+                                  <div
+                                    className="
+                                      mt-3
+                                      grid
+                                      grid-cols-2
+                                      gap-2
+                                    "
+                                  >
+                                    <div
+                                      className="
+                                        rounded-md
+                                        border
+                                        bg-background/70
+                                        px-2.5
+                                        py-2
+                                      "
+                                    >
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        F&iacute;sico
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-sm
+                                          font-bold
+                                          tabular-nums
+                                          text-foreground
+                                        "
+                                      >
+                                        {formatarNumeroEstoque(
+                                          item.quantidade,
+                                        )}
+                                      </p>
+                                    </div>
+
+
+                                    <div
+                                      className="
+                                        rounded-md
+                                        border
+                                        bg-background/70
+                                        px-2.5
+                                        py-2
+                                      "
+                                    >
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Reservado
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-sm
+                                          font-bold
+                                          tabular-nums
+                                          text-foreground
+                                        "
+                                      >
+                                        {formatarNumeroEstoque(
+                                          item.reservado,
+                                        )}
+                                      </p>
+                                    </div>
+
+
+                                    <div
+                                      className="
+                                        rounded-md
+                                        border
+                                        bg-background/70
+                                        px-2.5
+                                        py-2
+                                      "
+                                    >
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Bloqueado
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-sm
+                                          font-bold
+                                          tabular-nums
+                                          text-foreground
+                                        "
+                                      >
+                                        {formatarNumeroEstoque(
+                                          item.bloqueado,
+                                        )}
+                                      </p>
+                                    </div>
+
+
+                                    <div
+                                      className="
+                                        rounded-md
+                                        border
+                                        bg-background/70
+                                        px-2.5
+                                        py-2
+                                      "
+                                    >
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Dispon&iacute;vel
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-sm
+                                          font-bold
+                                          tabular-nums
+                                          text-foreground
+                                        "
+                                      >
+                                        {formatarNumeroEstoque(
+                                          item.disponivel,
+                                        )}
+                                      </p>
+                                    </div>
+                                  </div>
+
+
+                                  {/* IDENTIFICACAO DO REGISTRO */}
+                                  <div
+                                    className="
+                                      mt-3
+                                      grid
+                                      grid-cols-2
+                                      gap-x-3
+                                      gap-y-2
+                                      border-t
+                                      border-border/40
+                                      pt-3
+                                    "
+                                  >
+                                    <div className="min-w-0">
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Cliente
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          truncate
+                                          text-[11px]
+                                          font-medium
+                                          text-foreground
+                                        "
+                                        title={
+                                          item.cliente
+                                        }
+                                      >
+                                        {item.cliente}
+                                      </p>
+                                    </div>
+
+
+                                    <div className="min-w-0">
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Lote
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          truncate
+                                          text-[11px]
+                                          font-medium
+                                          text-foreground
+                                        "
+                                        title={
+                                          item.lote ??
+                                          undefined
+                                        }
+                                      >
+                                        {item.lote ??
+                                          "Sem lote"}
+                                      </p>
+                                    </div>
+
+
+                                    <div>
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Unidade
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-[11px]
+                                          font-medium
+                                          text-foreground
+                                        "
+                                      >
+                                        {item.unidade ??
+                                          "?"}
+                                      </p>
+                                    </div>
+
+
+                                    <div>
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Validade
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          text-[11px]
+                                          font-medium
+                                          tabular-nums
+                                          text-foreground
+                                        "
+                                      >
+                                        {formatarValidadeEstoque(
+                                          item.validade,
+                                        )}
+                                      </p>
+                                    </div>
+
+
+                                    <div className="min-w-0">
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Categoria
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          truncate
+                                          text-[11px]
+                                          font-medium
+                                          text-foreground
+                                        "
+                                        title={
+                                          item.categoria ??
+                                          undefined
+                                        }
+                                      >
+                                        {item.categoria ??
+                                          "?"}
+                                      </p>
+                                    </div>
+
+
+                                    <div className="min-w-0">
+                                      <p
+                                        className="
+                                          text-[9px]
+                                          uppercase
+                                          tracking-wide
+                                          text-muted-foreground
+                                        "
+                                      >
+                                        Tipo localiza&ccedil;&atilde;o
+                                      </p>
+
+                                      <p
+                                        className="
+                                          mt-0.5
+                                          truncate
+                                          text-[11px]
+                                          font-medium
+                                          text-foreground
+                                        "
+                                        title={
+                                          item.tipoLocalizacao ??
+                                          undefined
+                                        }
+                                      >
+                                        {item.tipoLocalizacao ??
+                                          "?"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+
+                    </>
+                  ) : (
+                    /*
+                     * ==========================================
+                     * ESTOQUE DO INVENTARIO
+                     * ITENS EFETIVAMENTE CONTADOS
+                     * ==========================================
+                     */
+                    <>
+                      {/* Resumo da contagem */}
+                      <div>
+                        <div
+                          className="
+                            mb-2
+                            flex
+                            items-center
+                            justify-between
+                            gap-3
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              font-semibold
+                              uppercase
+                              tracking-[0.14em]
+                              text-muted-foreground
+                            "
+                          >
+                            Resumo da contagem
+                          </p>
+
+                          <span
+                            className="
+                              text-[10px]
+                              font-medium
+                              text-muted-foreground
+                            "
+                          >
+                            Snapshot x rodada atual
+                          </span>
+                        </div>
+
+
+                        <div
+                          className="
+                            grid
+                            grid-cols-3
+                            gap-2
+                          "
+                        >
+                          {/* Esperado */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Esperado
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {resumoContagemSelecionada.esperado.toLocaleString(
+                                "pt-BR",
+                              )}
+                            </p>
+                          </div>
+
+
+                          {/* Contado */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Contado
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {resumoContagemSelecionada.possuiContagem
+                                ? resumoContagemSelecionada.contado.toLocaleString(
+                                    "pt-BR",
+                                  )
+                                : "\u2014"}
+                            </p>
+                          </div>
+
+
+                          {/* Diferenca */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Diferen&ccedil;a
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {resumoContagemSelecionada.possuiContagem
+                                ? resumoContagemSelecionada.diferenca.toLocaleString(
+                                    "pt-BR",
+                                    {
+                                      signDisplay:
+                                        "exceptZero",
+                                    },
+                                  )
+                                : "\u2014"}
+                            </p>
+                          </div>
+
+
+                          {/* SKUs */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              SKUs
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {
+                                resumoContagemSelecionada.skus
+                              }
+                            </p>
+                          </div>
+
+
+                          {/* Lotes */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Lotes
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {
+                                resumoContagemSelecionada.lotes
+                              }
+                            </p>
+                          </div>
+
+
+                          {/* Registros */}
+                          <div
+                            className="
+                              rounded-lg
+                              border
+                              border-border/40
+                              bg-muted/20
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-[10px]
+                                uppercase
+                                tracking-wide
+                                text-muted-foreground
+                              "
+                            >
+                              Registros
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-lg
+                                font-bold
+                                tabular-nums
+                                text-foreground
+                              "
+                            >
+                              {
+                                resumoContagemSelecionada.registros
+                              }
+                            </p>
+                          </div>
+                        </div>
+
+
+                        {!resumoContagemSelecionada.possuiContagem ? (
+                          <p
+                            className="
+                              mt-2
+                              text-[11px]
+                              text-muted-foreground
+                            "
+                          >
+                            Esta posi&ccedil;&atilde;o ainda n&atilde;o possui
+                            resultado de contagem na rodada atual.
+                          </p>
+                        ) : null}
+                      </div>
+
+
+                      {/* Itens contados */}
+                      <div className="mt-4">
+                        <div
+                          className="
+                            flex
+                            items-center
+                            justify-between
+                            gap-3
+                          "
+                        >
+                          <div>
+                            <p
+                              className="
+                                text-[10px]
+                                font-semibold
+                                uppercase
+                                tracking-[0.14em]
+                                text-muted-foreground
+                              "
+                            >
+                              Itens contados na posi&ccedil;&atilde;o
+                            </p>
+
+                            <p
+                              className="
+                                mt-1
+                                text-xs
+                                text-muted-foreground
+                              "
+                            >
+                              {(
+                                selected
+                                  .itensContados ??
+                                []
+                              ).length ===
+                              0
+                                ? "Nenhum item contado nesta rodada"
+                                : `${(
+                                    selected
+                                      .itensContados ??
+                                    []
+                                  ).length} registro(s) contado(s)`}
+                            </p>
+                          </div>
+
+
+                          {(
+                            selected
+                              .itensContados ??
+                            []
+                          ).length >
+                          0 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setItensPainelAberto(
+                                  (
+                                    atual,
+                                  ) =>
+                                    !atual,
+                                );
+                              }}
+                              className="
+                                shrink-0
+                                rounded-lg
+                                border
+                                border-border/50
+                                bg-background
+                                px-3
+                                py-2
+                                text-xs
+                                font-semibold
+                                text-foreground
+                                transition
+                                hover:bg-muted
+                              "
+                            >
+                              {itensPainelAberto
+                                ? "Ocultar itens"
+                                : `Ver ${(
+                                    selected
+                                      .itensContados ??
+                                    []
+                                  ).length} itens`}
+                            </button>
+                          ) : null}
+                        </div>
+
+
+                        {(
+                          selected
+                            .itensContados ??
+                          []
+                        ).length ===
+                        0 ? (
+                          <div
+                            className="
+                              mt-3
+                              rounded-lg
+                              border
+                              border-dashed
+                              border-border/60
+                              bg-muted/10
+                              px-3
+                              py-4
+                              text-center
+                            "
+                          >
+                            <p
+                              className="
+                                text-sm
+                                font-medium
+                                text-muted-foreground
+                              "
+                            >
+                              Nenhum item contado nesta
+                              posi&ccedil;&atilde;o na rodada atual.
+                            </p>
+                          </div>
+                        ) : null}
+
+
+                        {itensPainelAberto &&
+                        (
+                          selected
+                            .itensContados ??
+                          []
+                        ).length >
+                          0 ? (
+                          <div className="mt-3">
+                            <input
+                              type="search"
+                              value={
+                                pesquisaItensPainel
+                              }
+                              onChange={(
+                                evento,
+                              ) => {
+                                setPesquisaItensPainel(
+                                  evento.target
+                                    .value,
+                                );
+                              }}
+                              placeholder={
+                                "Buscar por c\u00f3digo, produto, lote ou status..."
+                              }
+                              className="
+                                h-10
+                                w-full
+                                rounded-lg
+                                border
+                                border-input
+                                bg-background
+                                px-3
+                                text-sm
+                                text-foreground
+                                outline-none
+                                transition
+                                placeholder:text-muted-foreground
+                                focus:ring-2
+                                focus:ring-ring
+                              "
+                            />
+
+
+                            <div
+                              className="
+                                mt-2
+                                flex
+                                items-center
+                                justify-between
+                                gap-3
+                              "
+                            >
+                              <p
+                                className="
+                                  text-[11px]
+                                  text-muted-foreground
+                                "
+                              >
+                                Exibindo{" "}
+                                <span className="font-semibold text-foreground">
+                                  {
+                                    itensContadosPainelFiltrados.length
+                                  }
+                                </span>{" "}
+                                de{" "}
+                                <span className="font-semibold text-foreground">
+                                  {
+                                    (
+                                      selected
+                                        .itensContados ??
+                                      []
+                                    ).length
+                                  }
+                                </span>
+                              </p>
+
+                              {pesquisaItensPainel ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPesquisaItensPainel(
+                                      "",
+                                    );
+                                  }}
+                                  className="
+                                    text-[11px]
+                                    font-semibold
+                                    text-primary
+                                    hover:underline
+                                  "
+                                >
+                                  Limpar
+                                </button>
+                              ) : null}
+                            </div>
+
+
+                            {itensContadosPainelFiltrados.length ===
+                            0 ? (
+                              <div
+                                className="
+                                  mt-3
+                                  rounded-lg
+                                  border
+                                  border-dashed
+                                  border-border/60
+                                  bg-muted/10
+                                  px-3
+                                  py-5
+                                  text-center
+                                "
+                              >
+                                <p
+                                  className="
+                                    text-sm
+                                    font-medium
+                                    text-muted-foreground
+                                  "
+                                >
+                                  Nenhum item encontrado.
+                                </p>
+                              </div>
+                            ) : (
+                              <div
+                                className="
+                                  mt-3
+                                  max-h-[310px]
+                                  space-y-2
+                                  overflow-y-auto
+                                  pr-1
+                                "
+                              >
+                                {itensContadosPainelFiltrados.map(
+                                  (
+                                    item,
+                                    index,
+                                  ) => (
+                                    <div
+                                      key={`${item.codigo}-${item.lote ?? "sem-lote"}-${index}`}
+                                      className="
+                                        rounded-lg
+                                        border
+                                        border-border/40
+                                        bg-muted/15
+                                        p-3
+                                      "
+                                    >
+                                      <div
+                                        className="
+                                          flex
+                                          items-start
+                                          justify-between
+                                          gap-3
+                                        "
+                                      >
+                                        <div className="min-w-0">
+                                          <p
+                                            className="
+                                              text-[10px]
+                                              font-semibold
+                                              uppercase
+                                              tracking-wide
+                                              text-muted-foreground
+                                            "
+                                          >
+                                            C&oacute;digo
+                                          </p>
+
+                                          <p
+                                            className="
+                                              mt-0.5
+                                              break-all
+                                              text-sm
+                                              font-bold
+                                              text-foreground
+                                            "
+                                          >
+                                            {
+                                              item.codigo
+                                            }
+                                          </p>
+                                        </div>
+
+                                        <div
+                                          className="
+                                            shrink-0
+                                            text-right
+                                          "
+                                        >
+                                          <p
+                                            className="
+                                              text-[10px]
+                                              uppercase
+                                              tracking-wide
+                                              text-muted-foreground
+                                            "
+                                          >
+                                            Qtd. contada
+                                          </p>
+
+                                          <p
+                                            className="
+                                              mt-0.5
+                                              text-sm
+                                              font-bold
+                                              tabular-nums
+                                              text-foreground
+                                            "
+                                          >
+                                            {item.quantidade.toLocaleString(
+                                              "pt-BR",
+                                            )}
+                                          </p>
+                                        </div>
+                                      </div>
+
+
+                                      <div className="mt-2">
+                                        <p
+                                          className="
+                                            text-[10px]
+                                            uppercase
+                                            tracking-wide
+                                            text-muted-foreground
+                                          "
+                                        >
+                                          Produto
+                                        </p>
+
+                                        <p
+                                          className="
+                                            mt-0.5
+                                            break-words
+                                            text-xs
+                                            font-medium
+                                            leading-5
+                                            text-foreground
+                                          "
+                                        >
+                                          {item.descricao?.trim() ||
+                                            item.codigo}
+                                        </p>
+                                      </div>
+
+
+                                      <div
+                                        className="
+                                          mt-2
+                                          grid
+                                          grid-cols-2
+                                          gap-3
+                                        "
+                                      >
+                                        <div>
+                                          <p
+                                            className="
+                                              text-[10px]
+                                              uppercase
+                                              tracking-wide
+                                              text-muted-foreground
+                                            "
+                                          >
+                                            Lote
+                                          </p>
+
+                                          <p
+                                            className="
+                                              mt-0.5
+                                              break-all
+                                              text-xs
+                                              font-medium
+                                              text-foreground
+                                            "
+                                          >
+                                            {item.lote ??
+                                              "Sem lote"}
+                                          </p>
+                                        </div>
+
+                                        <div>
+                                          <p
+                                            className="
+                                              text-[10px]
+                                              uppercase
+                                              tracking-wide
+                                              text-muted-foreground
+                                            "
+                                          >
+                                            Status
+                                          </p>
+
+                                          <p
+                                            className="
+                                              mt-0.5
+                                              break-words
+                                              text-xs
+                                              font-semibold
+                                              text-foreground
+                                            "
+                                          >
+                                            {
+                                              item.status
+                                            }
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+
+
+                  {/* Posicao fisica */}
+                  <div className="mt-4">
+                    <p
+                      className="
+                        mb-2
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-[0.14em]
+                        text-muted-foreground
+                      "
+                    >
+                      Posi&ccedil;&atilde;o f&iacute;sica
+                    </p>
+
+                    <div
+                      className="
+                        grid
+                        grid-cols-3
+                        gap-x-4
+                        gap-y-3
+                      "
+                    >
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Rua
+                        </p>
+                        <p className="text-sm font-semibold">
+                          {selected.rua}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Lado
+                        </p>
+                        <p className="text-sm font-semibold">
+                          {selected.lado ===
+                          "impar"
+                            ? "\u00cdmpar"
+                            : "Par"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          M&oacute;dulo
+                        </p>
+                        <p className="text-sm font-semibold tabular-nums">
+                          {selected.modulo}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          N&iacute;vel
+                        </p>
+                        <p className="text-sm font-semibold tabular-nums">
+                          {selected.nivel}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Posi&ccedil;&atilde;o
+                        </p>
+                        <p className="text-sm font-semibold tabular-nums">
+                          {selected.posicao}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Endere&ccedil;o
+                        </p>
+                        <p
+                          className="
+                            break-all
+                            text-sm
+                            font-semibold
+                          "
+                        >
+                          {selected.code}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+
+                  {/* Acoes */}
+                  <div
+                    className="
+                      mt-5
+                      flex
+                      gap-2
+                      border-t
+                      border-border/40
+                      pt-3
+                    "
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        focusOn(
+                          selected,
+                        );
+                      }}
+                      className="
+                        flex-1
+                        rounded-lg
+                        bg-primary
+                        px-3
+                        py-2
+                        text-xs
+                        font-semibold
+                        text-primary-foreground
+                        transition
+                        hover:opacity-90
+                      "
+                    >
+                      Focar posi&ccedil;&atilde;o
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={
+                        handleClear
+                      }
+                      className="
+                        rounded-lg
+                        border
+                        border-border/50
+                        bg-background
+                        px-3
+                        py-2
+                        text-xs
+                        font-semibold
+                        text-foreground
+                        transition
+                        hover:bg-muted
+                      "
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+
+            {/* Filtros sobre o mapa */}
+            <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-24px)]">
+              <div
+                className="
+                  pointer-events-auto
+                  w-fit
+                  max-w-full
+                  rounded-lg
+                  border
+                  border-border/20
+                  bg-background/80
+                  px-3
+                  py-2.5
+                  shadow-sm
+                  backdrop-blur-md
+                "
+              >
+                <div
+                  className="
+                    grid
+                    gap-3
+                    xl:grid-cols-[300px_220px_200px_190px]
+                    xl:items-end
+                  "
+                >
+                  {/* Localização */}
+                  <div className="min-w-0">
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Localização
+                    </p>
+
+                    <SearchBar
+                      onSearch={handleSearch}
+                      onResetCamera={resetCamera}
+                      feedback={feedback}
+                    />
+                  </div>
+
+                  {/* Cliente */}
+                  <label className="block">
+                    <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Cliente
+                    </span>
+
+                    <select
+                      value={
+                        tipoVisualizacao ===
+                        "estoque-atual"
+                          ? clienteSelecionado
+                          : "todos"
+                      }
+                      disabled={
+                        tipoVisualizacao !==
+                        "estoque-atual"
+                      }
+                      onChange={(evento) => {
+                        setClienteSelecionado(
+                          evento.target.value,
+                        );
+
+                        setFiltro(
+                          "todas",
+                        );
+
+                        setFeedback(
+                          null,
+                        );
+
+                        handleClear();
+                      }}
+                      className="
+                        h-11
+                        w-full
+                        rounded-lg
+                        border
+                        border-input
+                        bg-background/90
+                        px-3
+                        text-sm
+                        font-medium
+                        text-foreground
+                        outline-none
+                        transition
+                        focus:ring-2
+                        focus:ring-ring
+                      "
+                    >
+                      <option value="todos">
+                        {tipoVisualizacao ===
+                        "estoque-atual"
+                          ? "Todos os clientes"
+                          : "Cliente do inventário"}
+                      </option>
+
+                      {tipoVisualizacao ===
+                        "estoque-atual" &&
+                        clientesDisponiveis.map(
+                          (cliente) => (
+                            <option
+                              key={
+                                cliente.id
+                              }
+                              value={
+                                String(
+                                  cliente.id,
+                                )
+                              }
+                            >
+                              {
+                                cliente.nome
+                              }
+                            </option>
+                          ),
+                        )}
+                    </select>
+                  </label>
+
+
+                  {/* Tipo */}
+                  <label className="block">
+                    <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Tipo
+                    </span>
+
+                    <select
+                      value={tipoVisualizacao}
+                      onChange={(evento) => {
+                        const novaVisualizacao =
+                          evento.target.value as WarehouseMapViewType;
+
+                        setTipoVisualizacao(
+                          novaVisualizacao,
+                        );
+
+                        setFiltro(
+                          novaVisualizacao ===
+                            "estoque-inventario"
+                            ? "estoque"
+                            : "todas",
+                        );
+                        setFeedback(null);
+                        handleClear();
+                      }}
+                      className="
+                        h-11
+                        w-full
+                        rounded-lg
+                        border
+                        border-input
+                        bg-background/90
+                        px-3
+                        text-sm
+                        font-medium
+                        text-foreground
+                        outline-none
+                        transition
+                        focus:ring-2
+                        focus:ring-ring
+                      "
+                    >
+                      <option value="estoque-atual">
+                        Estoque do Armazém
+                      </option>
+
+                      <option
+                        value="estoque-inventario"
+                        disabled={!snapshotDisponivel}
+                      >
+                        Estoque inventário
+                      </option>
+                    </select>
+                  </label>
+
+                  {/* Status */}
+                  <label className="block">
+                    <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Status
+                    </span>
+
+                    <select
+                      value={filtro}
+                      onChange={(evento) => {
+                        setFiltro(
+                          evento.target.value as FiltroMapa,
+                        );
+
+                        setFeedback(
+                          null,
+                        );
+
+                        handleClear();
+                      }}
+                      className="
+                        h-11
+                        w-full
+                        rounded-lg
+                        border
+                        border-input
+                        bg-background/90
+                        px-3
+                        text-sm
+                        font-medium
+                        text-foreground
+                        outline-none
+                        transition
+                        focus:ring-2
+                        focus:ring-ring
+                      "
+                    >
+                      {opcoesStatus.map(
+                        (opcao) => (
+                          <option
+                            key={
+                              opcao.value
+                            }
+                            value={
+                              opcao.value
+                            }
+                          >
+                            {
+                              opcao.label
+                            }
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    <p
+                      className="
+                        mt-1
+                        pl-1
+                        text-[10px]
+                        font-medium
+                        leading-none
+                        text-muted-foreground/75
+                      "
+                    >
+                      Exibindo {locationsVisiveis.length} de {locationsBase.length}
+                    </p>
+                  </label>
+
+
+
+                </div>
+
+                {!snapshotDisponivel && avisoSnapshot ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Estoque do inventário indisponível para esta consulta.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Legenda dentro do mapa */}
+            <div className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-24px)]">
+              <Legend
+                tipoVisualizacao={
+                  tipoVisualizacao
+                }
+                tipoInventario={
+                  tipoInventario
+                }
+              />
+            </div>
+
+            {/* Ajuda de navegação */}
+            <div
+              className="
+                pointer-events-none
+                absolute
+                bottom-3
+                right-3
+                z-20
+                hidden
+                rounded-lg
+                border
+                border-border/80
+                bg-background/90
+                px-3
+                py-2
+                text-xs
+                text-muted-foreground
+                shadow-md
+                backdrop-blur-md
+                2xl:block
+              "
+            >
+              <span className="font-semibold text-foreground">Navegação:</span>{" "}
+              arraste para girar • scroll para zoom • clique para selecionar
+            </div>
+          </div>
+        </div>
+
+
+      </div>
+    </main>
+  );
+}

@@ -612,7 +612,7 @@ def _selecionar_candidatos(
         if (
             _normalizar_texto(
                 inventario.Tipo
-            ) == "OFICIAL"
+            ).upper() == "OFICIAL"
             and
             not rodada_operacional_concluida(
                 cursor=cursor,

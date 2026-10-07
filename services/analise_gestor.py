@@ -1,5 +1,9 @@
 from domain.exceptions import BusinessRuleViolation, NotFoundError
 
+from services.configuracoes_inventario_aplicadas import (
+    obter_tipo_rodada_aplicada,
+)
+
 
 # ============================================================
 # ANÁLISE GERENCIAL DO INVENTÁRIO OFICIAL
@@ -285,6 +289,7 @@ def _item_participou_rodada(
     id_inventario: int,
     id_rodada: int,
     numero_rodada: int,
+    tipo_rodada,
     codigo: str,
     lote: str
 ):
@@ -292,13 +297,22 @@ def _item_participou_rodada(
     # ========================================================
     # R1 / R2
     #
-    # Um item do universo oficial só deve ser tratado como
-    # participante quando a rodada estiver operacionalmente
-    # concluída. Isso evita interpretar ausência temporária
-    # de contagem como FALTA enquanto a rodada ainda ocorre.
+    # R1:
+    # - enquanto aberta, participa apenas o que foi contado;
+    # - quando finalizada, todo o universo oficial participa.
     #
-    # Itens efetivamente bipados continuam sendo reconhecidos
-    # mesmo antes da conclusão, inclusive sobras físicas.
+    # R2:
+    # - enquanto aberta, participa apenas o que foi contado;
+    # - quando finalizada, participa somente o item que
+    #   realmente pertenceu ao escopo da rodada:
+    #
+    #     1. item planejado em RodadaItens; OU
+    #     2. item do snapshot localizado em uma das
+    #        RodadaLocalizacoes da R2; OU
+    #     3. item efetivamente contado na R2.
+    #
+    # Isso impede que itens fora do escopo da R2 sejam
+    # interpretados como quantidade zero / FALTA.
     # ========================================================
 
     if numero_rodada <= 2:
@@ -328,8 +342,9 @@ def _item_participou_rodada(
             else ""
         )
 
-        if status_rodada == "FINALIZADA":
-            return True
+        # ====================================================
+        # ITEM EFETIVAMENTE CONTADO NA RODADA
+        # ====================================================
 
         cursor.execute(
             """
@@ -366,9 +381,163 @@ def _item_participou_rodada(
             )
         )
 
-        return (
-            cursor.fetchone()[0] > 0
+        possui_contagem = (
+            int(cursor.fetchone()[0] or 0)
+            > 0
         )
+
+        # Enquanto a rodada ainda ocorre, somente o que
+        # foi efetivamente bipado participa da analise.
+        if status_rodada != "FINALIZADA":
+            return possui_contagem
+
+        # ====================================================
+        # R1 FINALIZADA
+        #
+        # O universo da R1 e o universo oficial completo.
+        # ====================================================
+
+        if numero_rodada == 1:
+            return True
+
+        # ====================================================
+        # R2 FINALIZADA
+        #
+        # O comportamento depende da configuracao aplicada:
+        #
+        # COMPLETA
+        #   -> todo o universo oficial participa.
+        #
+        # DIVERGENCIAS
+        #   -> somente o escopo real da rodada participa.
+        #
+        # Sem configuracao aplicada:
+        #   -> preserva o comportamento legado de escopo.
+        # ====================================================
+
+        tipo_rodada_normalizado = (
+            _normalizar_texto(
+                tipo_rodada
+            )
+            .upper()
+        )
+
+        if tipo_rodada_normalizado == "COMPLETA":
+            return True
+
+        # ====================================================
+        # R2 COM ESCOPO RESTRITO
+        #
+        # A R2 possui escopo proprio.
+        # ====================================================
+
+        if possui_contagem:
+            return True
+
+        # ----------------------------------------------------
+        # ITEM EXPLICITAMENTE PLANEJADO NA RODADA
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM dbo.RodadaItens
+
+            WHERE
+                ID_Inventario = ?
+                AND ID_Rodada = ?
+
+                AND LTRIM(
+                    RTRIM(Codigo)
+                ) = ?
+
+                AND ISNULL(
+                    LTRIM(
+                        RTRIM(Lote)
+                    ),
+                    ''
+                ) = ?
+            """,
+            (
+                id_inventario,
+                id_rodada,
+                codigo,
+                lote
+            )
+        )
+
+        em_rodada_itens = (
+            int(cursor.fetchone()[0] or 0)
+            > 0
+        )
+
+        if em_rodada_itens:
+            return True
+
+        # ----------------------------------------------------
+        # ITEM DO SNAPSHOT DENTRO DE UMA LOCALIZACAO
+        # PLANEJADA PARA A R2
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM dbo.InventarioEstoqueSnapshot E
+
+            WHERE
+                E.ID_Inventario = ?
+
+                AND LTRIM(
+                    RTRIM(E.Codigo)
+                ) = ?
+
+                AND ISNULL(
+                    LTRIM(
+                        RTRIM(E.Lote)
+                    ),
+                    ''
+                ) = ?
+
+                AND EXISTS
+                (
+                    SELECT 1
+
+                    FROM dbo.RodadaLocalizacoes RL
+
+                    WHERE
+                        RL.ID_Inventario =
+                            E.ID_Inventario
+
+                        AND RL.ID_Rodada = ?
+
+                        AND UPPER(
+                            LTRIM(
+                                RTRIM(RL.Localizacao)
+                            )
+                        ) =
+                        UPPER(
+                            LTRIM(
+                                RTRIM(E.Localizacao)
+                            )
+                        )
+                )
+            """,
+            (
+                id_inventario,
+                codigo,
+                lote,
+                id_rodada
+            )
+        )
+
+        em_localizacao_da_rodada = (
+            int(cursor.fetchone()[0] or 0)
+            > 0
+        )
+
+        return em_localizacao_da_rodada
 
     # ========================================================
     # R3+
@@ -664,6 +833,34 @@ def analisar_inventario_gestor(
         id_inventario=id_inventario
     )
 
+    # ========================================================
+    # TIPO APLICADO DE CADA RODADA
+    #
+    # Carregado uma unica vez por rodada para evitar consultar
+    # a configuracao para cada item do universo analisado.
+    #
+    # Inventarios legados sem configuracao aplicada continuam
+    # usando o comportamento anterior.
+    # ========================================================
+
+    for rodada in rodadas:
+
+        try:
+
+            rodada["tipo_rodada"] = (
+                obter_tipo_rodada_aplicada(
+                    cursor=cursor,
+                    id_inventario=id_inventario,
+                    numero_rodada=int(
+                        rodada["numero_rodada"]
+                    ),
+                )
+            )
+
+        except NotFoundError:
+
+            rodada["tipo_rodada"] = None
+
     if not rodadas:
 
         raise BusinessRuleViolation(
@@ -867,6 +1064,9 @@ def analisar_inventario_gestor(
                     id_inventario=id_inventario,
                     id_rodada=id_rodada,
                     numero_rodada=numero_rodada,
+                    tipo_rodada=rodada.get(
+                        "tipo_rodada"
+                    ),
                     codigo=codigo,
                     lote=lote
                 )

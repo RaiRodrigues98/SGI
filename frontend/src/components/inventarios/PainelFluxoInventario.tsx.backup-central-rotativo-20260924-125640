@@ -1,0 +1,1280 @@
+import type { ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
+
+import type { PreviewProximaRodadaResposta } from "@/services/rodadasService";
+import type { InventarioDetalhe } from "@/types/inventory";
+
+interface CentralInventarioProps {
+  inventario: InventarioDetalhe;
+  snapshotGerado: boolean;
+  statusSnapshotCarregado: boolean;
+  podeExecutarContagem: boolean;
+  previewRodada?: PreviewProximaRodadaResposta["preview"] | null;
+  carregandoPreview?: boolean;
+  erroPreview?: string | null;
+  podeControlarRodadas?: boolean;
+}
+
+interface AcaoCentral {
+  titulo: string;
+  descricao: string;
+  responsavel: string;
+  proximaEtapa: string;
+  rotuloBotao: string;
+  to:
+    | "/acompanhamento-contagem"
+    | "/analise-ciclica"
+    | "/analise-gestor"
+    | "/analise-oficial"
+    | "/auditoria"
+    | "/historico"
+    | "/ciclo-rotativo"
+    | "/contagem"
+    | "/inventarios/$idInventario/controle-rodadas"
+    | "/inventarios/$idInventario/estoque-escopo"
+    | "/recontagem";
+  usaParams?: boolean;
+  tom: "amber" | "blue" | "emerald" | "neutral";
+}
+
+interface BloqueioCentral {
+  titulo: string;
+  quantidade?: number;
+}
+
+function normalizar(valor: string | null | undefined) {
+  return (valor ?? "").trim().toUpperCase();
+}
+
+function inventarioEncerrado(inventario: InventarioDetalhe) {
+  return ["FINALIZADO", "ENCERRADO", "CANCELADO"].includes(
+    normalizar(inventario.status),
+  );
+}
+
+function contagemConcluida(inventario: InventarioDetalhe) {
+  return (
+    (inventario.total_localizacoes ?? 0) > 0 &&
+    (inventario.localizacoes_concluidas ?? 0) ===
+      (inventario.total_localizacoes ?? 0) &&
+    (inventario.localizacoes_pendentes ?? 0) === 0 &&
+    (inventario.localizacoes_em_contagem ?? 0) === 0
+  );
+}
+
+function LinkAcao({
+  acao,
+  idInventario,
+}: {
+  acao: AcaoCentral;
+  idInventario: number;
+}) {
+  const classe =
+    acao.tom === "amber"
+      ? "bg-amber-700 text-white hover:bg-amber-800"
+      : acao.tom === "blue"
+        ? "bg-sky-700 text-white hover:bg-sky-800"
+        : acao.tom === "emerald"
+          ? "bg-emerald-700 text-white hover:bg-emerald-800"
+          : "bg-primary text-primary-foreground hover:opacity-90";
+
+  if (acao.usaParams) {
+    return (
+      <Link
+        to={acao.to as "/inventarios/$idInventario/controle-rodadas"}
+        params={{ idInventario: String(idInventario) }}
+        className={`inline-flex min-h-11 items-center justify-center rounded-md px-5 text-sm font-semibold transition ${classe}`}
+      >
+        {acao.rotuloBotao}
+      </Link>
+    );
+  }
+
+  if (acao.to === "/historico") {
+    return (
+      <Link
+        to="/historico"
+        search={{
+          inventario: idInventario,
+          aba: "visao-geral",
+        }}
+        className={`inline-flex min-h-11 items-center justify-center rounded-md px-5 text-sm font-semibold transition ${classe}`}
+      >
+        {acao.rotuloBotao}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      to={acao.to as "/auditoria"}
+      search={{ inventario: idInventario }}
+      className={`inline-flex min-h-11 items-center justify-center rounded-md px-5 text-sm font-semibold transition ${classe}`}
+    >
+      {acao.rotuloBotao}
+    </Link>
+  );
+}
+
+
+function LinkEtapaAtual({
+  acao,
+  idInventario,
+  children,
+  className,
+}: {
+  acao: AcaoCentral;
+  idInventario: number;
+  children: ReactNode;
+  className: string;
+}) {
+  const classe = `${className} group block cursor-pointer transition duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
+
+  const ariaLabel = `Abrir etapa atual: ${acao.titulo}`;
+
+  if (acao.usaParams) {
+    return (
+      <Link
+        to={acao.to as "/inventarios/$idInventario/controle-rodadas"}
+        params={{ idInventario: String(idInventario) }}
+        className={classe}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      to={acao.to as "/auditoria"}
+      search={{ inventario: idInventario }}
+      className={classe}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function ResumoCentral({
+  titulo,
+  valor,
+  destaque = false,
+}: {
+  titulo: string;
+  valor: string | number;
+  destaque?: boolean;
+}) {
+  return (
+    <div
+      className={
+        destaque
+          ? "rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30"
+          : "rounded-lg border bg-background/80 p-3"
+      }
+    >
+      <p className="text-xs font-medium text-muted-foreground">{titulo}</p>
+      <p className="mt-1 text-xl font-bold">{valor}</p>
+    </div>
+  );
+}
+
+
+function descricaoBloqueioCentral(titulo: string) {
+  const valor = normalizar(titulo);
+
+  if (valor.includes("LOCALIZA") && valor.includes("PENDENTE")) {
+    return "Aguardando conclusão da operação";
+  }
+
+  if (
+    valor.includes("CONTAGEM") &&
+    (valor.includes("ANDAMENTO") || valor.includes("EM CONTAGEM"))
+  ) {
+    return "Existe contagem ainda aberta";
+  }
+
+  if (valor.includes("DIVERG") && valor.includes("DECIS")) {
+    return "Aguardando decisão responsável";
+  }
+
+  if (valor.includes("RECONTAGEM")) {
+    return "Necessário concluir antes de avançar";
+  }
+
+  if (valor.includes("SNAPSHOT")) {
+    return "O estoque de referência ainda não foi congelado";
+  }
+
+  if (valor.includes("ESCOPO ROTATIVO")) {
+    return "Selecione as localizações antes de iniciar a contagem";
+  }
+
+  if (valor.includes("ESCOPO")) {
+    return "Defina o escopo antes de iniciar as rodadas";
+  }
+
+  if (valor.includes("CICLO") || valor.includes("UNIVERSO")) {
+    return "Configure o ciclo antes de iniciar a execução";
+  }
+
+  return "Pendência obrigatória para avançar";
+}
+
+function EstruturaCentral({
+  inventario,
+  tipo,
+  statusExibido,
+  acao,
+  bloqueios,
+  etapas,
+  etapaAtual,
+  carregando = false,
+  erro = null,
+}: {
+  inventario: InventarioDetalhe;
+  tipo: "OFICIAL" | "ROTATIVO";
+  statusExibido: string;
+  acao: AcaoCentral;
+  bloqueios: BloqueioCentral[];
+  etapas: string[];
+  etapaAtual: number;
+  carregando?: boolean;
+  erro?: string | null;
+}) {
+  const oficial = tipo === "OFICIAL";
+  const percentual = Math.min(
+    100,
+    Math.max(0, Number(inventario.percentual_progresso ?? 0)),
+  );
+
+
+  // ESTADO_FINALIZADO_AUDITORIA
+  const statusCentral = normalizar(inventario.status);
+  const cancelado = statusCentral === "CANCELADO";
+
+  const encerramentoConcluido =
+    ["FINALIZADO", "ENCERRADO"].includes(statusCentral);
+  const encerrado = cancelado || encerramentoConcluido;
+
+
+  // RESUMO_COMPARATIVO_RODADA
+  const totalRodada = inventario.total_localizacoes ?? 0;
+  const concluidasRodada = inventario.localizacoes_concluidas ?? 0;
+  const pendentesRodada = inventario.localizacoes_pendentes ?? 0;
+  const emContagemRodada = inventario.localizacoes_em_contagem ?? 0;
+  const divergenciasRodada = inventario.total_divergencias ?? 0;
+  const divergenciasSemDecisao = inventario.divergencias_sem_decisao ?? 0;
+  const recontagensPendentes = inventario.recontagens_pendentes ?? 0;
+
+  const restanteRodada = pendentesRodada + emContagemRodada;
+
+  const rodadaOperacionalConcluida =
+    totalRodada > 0 &&
+    concluidasRodada === totalRodada &&
+    restanteRodada === 0;
+
+  const percentualCoberturaRodada =
+    totalRodada > 0
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round((concluidasRodada / totalRodada) * 100),
+          ),
+        )
+      : 0;
+
+  const totalPendenciasRodada =
+    (inventario.localizacoes_pendentes ?? 0) +
+    (inventario.localizacoes_em_contagem ?? 0);
+
+  function rotuloEtapaJornada(etapa: string, indice: number) {
+    if (!oficial || indice !== 2) {
+      return etapa;
+    }
+
+    const rodada = Math.max(1, Number(inventario.rodada_atual ?? 1));
+
+    if (rodada === 1) {
+      return "R1 \u2014 Contagem inicial";
+    }
+
+    if (rodada === 2) {
+      return "R2 \u2014 Recontagem";
+    }
+
+    return `R${rodada} \u2014 Contagem de desempate`;
+  }
+
+  function detalheEtapaJornada(indice: number) {
+    if (cancelado) {
+      return "Inventário cancelado";
+    }
+
+    if (encerramentoConcluido) {
+      return "Concluída";
+    }
+
+    if (indice < etapaAtual) {
+      return "Conclu\u00edda";
+    }
+
+    if (indice > etapaAtual) {
+      if (oficial && indice === 3) {
+        return "Dispon\u00edvel ap\u00f3s as rodadas";
+      }
+
+      if (oficial && indice === 4) {
+        return "Aguardando resolu\u00e7\u00e3o";
+      }
+
+      return "Aguardando etapa anterior";
+    }
+
+    if (oficial && indice === 2 && totalPendenciasRodada > 0) {
+      return totalPendenciasRodada === 1
+        ? "1 localiza\u00e7\u00e3o restante"
+        : `${totalPendenciasRodada} localiza\u00e7\u00f5es restantes`;
+    }
+
+    return statusExibido;
+  }
+
+
+  return (
+    <section
+      className={
+        oficial
+          ? "rounded-xl border border-amber-300 bg-amber-50/40 p-5 shadow-xs dark:border-amber-900 dark:bg-amber-950/20"
+          : "rounded-xl border border-sky-300 bg-sky-50/40 p-5 shadow-xs dark:border-sky-900 dark:bg-sky-950/20"
+      }
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p
+            className={
+              oficial
+                ? "text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                : "text-xs font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300"
+            }
+          >
+            Central de controle · Inventário {oficial ? "oficial" : "rotativo"}
+          </p>
+          <h2 className="mt-1 text-xl font-bold">{statusExibido}</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            {acao.descricao}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {oficial && (
+            <span className="rounded-full border bg-background px-3 py-1 text-xs font-semibold">
+              R{inventario.rodada_atual}
+            </span>
+          )}
+          <span className="rounded-full border bg-background px-3 py-1 text-xs font-semibold">
+            {tipo}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-lg border bg-background/85 p-4">
+        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              {encerrado ? "Consulta e auditoria" : "Ação necessária agora"}
+            </p>
+            <h3 className="mt-1 text-lg font-semibold">{acao.titulo}</h3>
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <p>
+                <span className="text-muted-foreground">Responsável atual:</span>{" "}
+                <strong>{acao.responsavel}</strong>
+              </p>
+              <p>
+                <span className="text-muted-foreground">{encerrado ? "Disponível em:" : "Depois:"}</span>{" "}
+                <strong>{acao.proximaEtapa}</strong>
+              </p>
+            </div>
+          </div>
+          {!carregando && <LinkAcao acao={acao} idInventario={inventario.id_inventario} />}
+        </div>
+
+        {carregando && (
+          <p role="status" className="mt-3 text-sm text-muted-foreground">
+            Verificando a próxima etapa permitida...
+          </p>
+        )}
+        {erro && (
+          <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">
+            Não foi possível confirmar a próxima rodada. {erro}
+          </p>
+        )}
+      </div>
+
+
+      {/* RESUMO_DECISAO_GERENCIAL */}
+      {oficial && etapaAtual === 3 && (
+        <div
+          className={
+            (inventario.divergencias_sem_decisao ?? 0) > 0
+              ? "mt-4 rounded-lg border border-amber-300 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20"
+              : "mt-4 rounded-lg border border-emerald-300 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"
+          }
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold">
+                  Decisão gerencial
+                </h3>
+
+                <span
+                  className={
+                    (inventario.divergencias_sem_decisao ?? 0) > 0
+                      ? "rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200"
+                      : "rounded-full bg-emerald-200 px-2.5 py-1 text-xs font-bold text-emerald-900 dark:bg-emerald-900/60 dark:text-emerald-200"
+                  }
+                >
+                  {(inventario.divergencias_sem_decisao ?? 0) > 0
+                    ? "Ação necessária"
+                    : "Sem pendências"}
+                </span>
+              </div>
+
+              {(inventario.divergencias_sem_decisao ?? 0) > 0 ? (
+                <>
+                  <p className="mt-2 text-lg font-bold">
+                    {inventario.divergencias_sem_decisao} divergência
+                    {inventario.divergencias_sem_decisao === 1 ? "" : "s"} aguardando decisão
+                  </p>
+
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    A rodada foi concluída, mas o inventário depende da análise do gestor para continuar.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-2 text-lg font-bold">
+                    Nenhuma divergência aguarda decisão
+                  </p>
+
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    A etapa gerencial não possui decisões pendentes. Revise o resultado e defina o próximo passo.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="grid shrink-0 gap-2 sm:grid-cols-2 lg:min-w-[360px]">
+              <div className="rounded-lg border bg-background/80 px-3 py-2.5">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Responsável atual
+                </p>
+
+                <p className="mt-0.5 text-sm font-bold">
+                  Gestor
+                </p>
+              </div>
+
+              <div className="rounded-lg border bg-background/80 px-3 py-2.5">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Próximo passo
+                </p>
+
+                <p className="mt-0.5 text-sm font-bold">
+                  {(inventario.divergencias_sem_decisao ?? 0) > 0
+                    ? "Resolver decisões"
+                    : "Definir avanço"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {encerramentoConcluido && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-emerald-300 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/20">
+          <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="size-6"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M20 6L9 17L4 12"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-bold text-emerald-950 dark:text-emerald-200">
+                    Encerramento concluído
+                  </h3>
+
+                  <span className="rounded-full bg-emerald-200 px-2.5 py-1 text-xs font-bold text-emerald-900 dark:bg-emerald-900/60 dark:text-emerald-200">
+                    FINALIZADO
+                  </span>
+                </div>
+
+                <p className="mt-1 max-w-2xl text-sm text-emerald-900/80 dark:text-emerald-200/80">
+                  O fluxo operacional foi concluído. Esta Central passa a funcionar como ponto de consulta para auditoria, rastreabilidade e resultado final.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid shrink-0 gap-2 sm:grid-cols-3 lg:min-w-[440px]">
+              <div className="rounded-lg border border-emerald-200 bg-background/80 px-3 py-2.5 dark:border-emerald-900">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Rodada final
+                </p>
+
+                <p className="mt-0.5 text-sm font-bold">
+                  R{inventario.rodada_atual}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-emerald-200 bg-background/80 px-3 py-2.5 dark:border-emerald-900">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Cobertura
+                </p>
+
+                <p className="mt-0.5 text-sm font-bold">
+                  {inventario.localizacoes_concluidas ?? 0}
+                  {" / "}
+                  {inventario.total_localizacoes ?? 0}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-emerald-200 bg-background/80 px-3 py-2.5 dark:border-emerald-900">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Divergências
+                </p>
+
+                <p className="mt-0.5 text-sm font-bold">
+                  {inventario.total_divergencias ?? 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-emerald-200 bg-background/50 px-5 py-3 dark:border-emerald-900">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+              <span>
+                <strong className="text-foreground">
+                  Operação:
+                </strong>{" "}
+                concluída
+              </span>
+
+              <span>
+                <strong className="text-foreground">
+                  Decisões:
+                </strong>{" "}
+                encerradas
+              </span>
+
+              <span>
+                <strong className="text-foreground">
+                  Consulta:
+                </strong>{" "}
+                auditoria e resultado final
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ResumoCentral titulo="Localizações" valor={inventario.total_localizacoes ?? 0} />
+        <ResumoCentral
+          titulo="Concluídas"
+          valor={inventario.localizacoes_concluidas ?? 0}
+        />
+        <ResumoCentral
+          titulo="Divergências"
+          valor={inventario.total_divergencias ?? 0}
+          destaque={(inventario.total_divergencias ?? 0) > 0}
+        />
+        <ResumoCentral
+          titulo="Progresso operacional"
+          valor={`${percentual.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+        />
+      </div>
+
+
+      {oficial && !encerrado && (
+        <div className="mt-4 rounded-lg border bg-background/75 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold">
+                  Resumo comparativo da rodada
+                </h3>
+
+                <span className="rounded-full border bg-background px-2.5 py-1 text-xs font-bold">
+                  R{inventario.rodada_atual}
+                </span>
+              </div>
+
+              <p className="mt-1 text-xs text-muted-foreground">
+                Situação operacional da rodada atual antes do próximo avanço.
+              </p>
+            </div>
+
+            <span
+              className={
+                rodadaOperacionalConcluida
+                  ? "w-fit rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                  : "w-fit rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+              }
+            >
+              {rodadaOperacionalConcluida
+                ? "Rodada concluída"
+                : "Rodada em andamento"}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border bg-background p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Cobertura
+                </p>
+
+                <span className="text-xs font-bold">
+                  {percentualCoberturaRodada}%
+                </span>
+              </div>
+
+              <p className="mt-1 text-lg font-bold">
+                {concluidasRodada} de {totalRodada}
+              </p>
+
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-emerald-600 transition-all"
+                  style={{ width: `${percentualCoberturaRodada}%` }}
+                />
+              </div>
+
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Localizações concluídas
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-background p-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Restantes
+              </p>
+
+              <p className="mt-1 text-lg font-bold">
+                {restanteRodada}
+              </p>
+
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                {pendentesRodada} pendente{pendentesRodada === 1 ? "" : "s"}
+                {emContagemRodada > 0
+                  ? ` · ${emContagemRodada} em contagem`
+                  : ""}
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-background p-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Divergências
+              </p>
+
+              <p className="mt-1 text-lg font-bold">
+                {divergenciasRodada}
+              </p>
+
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Identificadas na rodada atual
+              </p>
+            </div>
+
+            <div
+              className={
+                divergenciasSemDecisao > 0 || recontagensPendentes > 0
+                  ? "rounded-lg border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20"
+                  : "rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/20"
+              }
+            >
+              <p className="text-xs font-medium text-muted-foreground">
+                Pendências de análise
+              </p>
+
+              <p className="mt-1 text-lg font-bold">
+                {divergenciasSemDecisao + recontagensPendentes}
+              </p>
+
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                {divergenciasSemDecisao} sem decisão
+                {recontagensPendentes > 0
+                  ? ` · ${recontagensPendentes} recontagem${recontagensPendentes === 1 ? "" : "ens"} pendente${recontagensPendentes === 1 ? "" : "s"}`
+                  : ""}
+              </p>
+            </div>
+          </div>
+
+          {rodadaOperacionalConcluida && (
+            <div className="mt-3 flex flex-col gap-1 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/20">
+              <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300">
+                Execução operacional concluída
+              </p>
+
+              <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80">
+                A rodada não possui mais localizações pendentes ou em contagem.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div
+        className={
+          encerrado
+            ? "mt-4 grid gap-4"
+            : "mt-4 grid gap-4 xl:grid-cols-[1.35fr_1fr]"
+        }
+      >
+        <div className="rounded-lg border bg-background/75 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">
+                {encerrado
+                  ? "Trilha do inventário"
+                  : "Jornada"}
+              </h3>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {encerrado
+                  ? cancelado
+                    ? "Fluxo cancelado e preservado para rastreabilidade."
+                    : "Fluxo concluído e preservado para rastreabilidade."
+                  : "Acompanhe o avanço do inventário entre as etapas."}
+              </p>
+            </div>
+
+            <span className="shrink-0 rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {cancelado
+                ? "Cancelado"
+                : `Etapa ${Math.min(etapaAtual + 1, etapas.length)} de ${etapas.length}`}
+            </span>
+          </div>
+
+          <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            {etapas.map((etapa, indice) => {
+              const atual =
+                !encerrado &&
+                indice === etapaAtual;
+
+              const concluida =
+                encerramentoConcluido ||
+                (!cancelado && indice < etapaAtual);
+
+              const futura =
+                !encerrado &&
+                indice > etapaAtual;
+
+              const classeEtapa = atual
+                ? oficial
+                  ? "min-h-[86px] rounded-lg border border-amber-400 bg-amber-100 px-3 py-3 text-amber-950 shadow-sm dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
+                  : "min-h-[86px] rounded-lg border border-sky-400 bg-sky-100 px-3 py-3 text-sky-950 shadow-sm dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-200"
+                : concluida
+                  ? "min-h-[86px] rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-3 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  : "min-h-[86px] rounded-lg border bg-muted/20 px-3 py-3 text-muted-foreground";
+
+              const conteudo = (
+                <>
+                  <div className="flex items-start gap-2">
+                    <span
+                      aria-hidden="true"
+                      className={
+                        concluida
+                          ? "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white"
+                          : atual
+                            ? oficial
+                              ? "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-600 text-[10px] text-white"
+                              : "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-sky-600 text-[10px] text-white"
+                            : "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]"
+                      }
+                    >
+                      {concluida ? "\u2713" : atual ? "\u25cf" : "\u25cb"}
+                    </span>
+
+                    <div className="min-w-0">
+                      <p
+                        className={
+                          atual || concluida
+                            ? "text-xs font-bold leading-5"
+                            : "text-xs font-semibold leading-5"
+                        }
+                      >
+                        {rotuloEtapaJornada(etapa, indice)}
+                      </p>
+
+                      <p
+                        className={
+                          futura
+                            ? "mt-0.5 text-[11px] leading-4 text-muted-foreground"
+                            : "mt-0.5 text-[11px] leading-4 opacity-80"
+                        }
+                      >
+                        {detalheEtapaJornada(indice)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {atual && (
+                    <div
+                      className={
+                        oficial
+                          ? "mt-2 flex items-center justify-end text-[11px] font-bold text-amber-800 dark:text-amber-300"
+                          : "mt-2 flex items-center justify-end text-[11px] font-bold text-sky-800 dark:text-sky-300"
+                      }
+                    >
+                      <span>Abrir etapa</span>
+                      <span
+                        aria-hidden="true"
+                        className="ml-1 transition-transform group-hover:translate-x-0.5"
+                      >
+                        ?
+                      </span>
+                    </div>
+                  )}
+                </>
+              );
+
+              return (
+                <li key={`${indice}-${etapa}`}>
+                  {atual ? (
+                    <LinkEtapaAtual
+                      acao={acao}
+                      idInventario={inventario.id_inventario}
+                      className={classeEtapa}
+                    >
+                      {conteudo}
+                    </LinkEtapaAtual>
+                  ) : (
+                    <div className={classeEtapa}>
+                      {conteudo}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        <div
+          className={
+            encerrado
+              ? "hidden"
+              : "rounded-lg border bg-background/75 p-4"
+          }
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">
+                Bloqueios para avançar
+              </h3>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Pendências que impedem a continuidade do fluxo.
+              </p>
+            </div>
+
+            <span
+              className={
+                bloqueios.length > 0
+                  ? "rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                  : "rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+              }
+            >
+              {bloqueios.length}
+            </span>
+          </div>
+
+          {bloqueios.length > 0 ? (
+            <ul className="mt-4 space-y-2">
+              {bloqueios.map((bloqueio, indice) => (
+                <li
+                  key={`${bloqueio.titulo}-${indice}`}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/20"
+                >
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500"
+                    />
+
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {bloqueio.titulo}
+                      </p>
+
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {descricaoBloqueioCentral(bloqueio.titulo)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {typeof bloqueio.quantidade === "number" && (
+                    <span className="shrink-0 rounded-md border bg-background px-2 py-1 text-sm font-bold">
+                      {bloqueio.quantidade}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+              <div className="flex items-start gap-2.5">
+                <span
+                  aria-hidden="true"
+                  className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white"
+                >
+                  ✓
+                </span>
+
+                <div>
+                  <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300">
+                    Etapa liberada
+                  </p>
+
+                  <p className="mt-0.5 text-xs text-emerald-800/80 dark:text-emerald-300/80">
+                    Nenhuma pendência impede o avanço do inventário.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CentralInventarioOficial(props: CentralInventarioProps) {
+  const { inventario, previewRodada = null } = props;
+  const fase = normalizar(inventario.fase_operacional);
+  const status = normalizar(inventario.status);
+  const encerrado = inventarioEncerrado(inventario);
+  const concluida = contagemConcluida(inventario);
+  const etapaGestor =
+    inventario.em_analise_gestor ||
+    ["AGUARDANDO_GESTOR", "AGUARDANDO_DECISAO"].includes(fase) ||
+    previewRodada?.tipo_proxima_rodada === "GESTOR";
+  const recontagem = [
+    "AGUARDANDO_RECONTAGEM",
+    "EM_RECONTAGEM",
+    "RECONTAGEM_PENDENTE",
+  ].includes(fase);
+
+  let statusExibido = "Contagem oficial em andamento";
+  let etapaAtual = 2;
+  let acao: AcaoCentral = {
+    titulo: props.podeExecutarContagem ? "Executar a rodada atual" : "Acompanhar a rodada atual",
+    descricao: `A rodada R${inventario.rodada_atual} ainda possui trabalho operacional pendente.`,
+    responsavel: "Operação",
+    proximaEtapa: "Analisar o resultado da rodada",
+    rotuloBotao: props.podeExecutarContagem ? "Abrir contagem" : "Acompanhar contagem",
+    to: props.podeExecutarContagem ? "/contagem" : "/acompanhamento-contagem",
+    tom: "neutral",
+  };
+
+  if (encerrado) {
+    etapaAtual = 4;
+
+    if (status === "CANCELADO") {
+      statusExibido = "Inventário cancelado";
+
+      acao = {
+        titulo: "Consultar o histórico do inventário",
+        descricao:
+          "O processo foi cancelado e permanece disponível para rastreabilidade.",
+        responsavel: "Consulta",
+        proximaEtapa: "Histórico e auditoria",
+        rotuloBotao: "Consultar auditoria",
+        to: "/auditoria",
+        tom: "neutral",
+      };
+    } else {
+      statusExibido = "Inventário oficial finalizado";
+
+      acao = {
+        titulo: "Consultar auditoria e resultado final",
+        descricao:
+          "O inventário foi encerrado. Os registros permanecem disponíveis para consulta, evidências e rastreabilidade.",
+        responsavel: "Consulta / Auditoria",
+        proximaEtapa: "Histórico, evidências e resultado final",
+        rotuloBotao: "Ver hist\u00f3rico completo",
+        to: "/historico",
+        tom: "emerald",
+      };
+    }
+  } else if (!props.statusSnapshotCarregado) {
+    statusExibido = "Verificando preparação do inventário";
+    etapaAtual = 0;
+  } else if (!props.snapshotGerado) {
+    statusExibido = fase === "DEFINIR_ESCOPO" ? "Escopo ainda não definido" : "Snapshot pendente";
+    etapaAtual = fase === "DEFINIR_ESCOPO" ? 0 : 1;
+    acao = {
+      titulo: "Preparar o inventário oficial",
+      descricao: "Defina o escopo e gere o snapshot que será a referência congelada das rodadas.",
+      responsavel: "Analista",
+      proximaEtapa: "Liberar a primeira rodada",
+      rotuloBotao: "Preparar estoque e escopo",
+      to: "/inventarios/$idInventario/estoque-escopo",
+      usaParams: true,
+      tom: "neutral",
+    };
+  } else if (etapaGestor) {
+    const pendentes = inventario.divergencias_sem_decisao ?? 0;
+
+    etapaAtual = 3;
+
+    if (pendentes > 0) {
+      statusExibido = "Aguardando decisão gerencial";
+
+      acao = {
+        titulo: `Analisar ${pendentes} divergência${pendentes === 1 ? "" : "s"}`,
+        descricao:
+          `A R${inventario.rodada_atual} foi concluída. ` +
+          `${pendentes} divergência${pendentes === 1 ? "" : "s"} ` +
+          `aguarda${pendentes === 1 ? "" : "m"} decisão gerencial antes do avanço. ` +
+          "Abra a análise, examine cada item e registre a decisão correspondente.",
+        responsavel: "Gestor",
+        proximaEtapa: "Após decidir todos os itens, revisar se cabe nova rodada ou finalização",
+        rotuloBotao:
+          `Analisar ${pendentes} divergência${pendentes === 1 ? "" : "s"}`,
+        to: "/analise-gestor",
+        tom: "amber",
+      };
+    } else {
+      statusExibido = "Decisão gerencial sem pendências";
+
+      acao = {
+        titulo: "Revisar o próximo passo do inventário",
+        descricao:
+          `A R${inventario.rodada_atual} foi concluída e não existem ` +
+          "divergências aguardando decisão. Revise o resultado antes de avançar.",
+        responsavel: "Gestor",
+        proximaEtapa: "Gerar nova rodada ou finalizar o inventário",
+        rotuloBotao: "Revisar decisão gerencial",
+        to: "/analise-gestor",
+        tom: "emerald",
+      };
+    }
+  } else if (inventario.pode_finalizar || ["PRONTO_FINALIZAR", "PRONTO_PARA_FINALIZAR"].includes(fase)) {
+    statusExibido = "Pronto para finalizar";
+    etapaAtual = 4;
+    acao = {
+      titulo: "Finalizar o inventário oficial",
+      descricao: "As rodadas e decisões obrigatórias foram concluídas.",
+      responsavel: "Gestor",
+      proximaEtapa: "Consultar o resultado final",
+      rotuloBotao: "Revisar e finalizar",
+      to: "/analise-gestor",
+      tom: "emerald",
+    };
+  } else if (previewRodada?.pode_criar) {
+    statusExibido = "Próxima rodada disponível";
+    etapaAtual = 2;
+    acao = {
+      titulo: `Gerar R${previewRodada.numero_proxima_rodada}`,
+      descricao: `${previewRodada.candidatos} item(ns) foram indicados para a próxima rodada.`,
+      responsavel: "Analista ou gestor",
+      proximaEtapa: "Executar a nova rodada",
+      rotuloBotao: "Abrir controle de rodadas",
+      to: "/inventarios/$idInventario/controle-rodadas",
+      usaParams: true,
+      tom: "emerald",
+    };
+  } else if (recontagem) {
+    statusExibido = "Recontagem em andamento";
+    etapaAtual = 2;
+    acao = {
+      titulo: `Concluir a recontagem R${inventario.rodada_atual}`,
+      descricao: "A rodada atual precisa ser concluída antes de uma nova comparação.",
+      responsavel: "Operação",
+      proximaEtapa: "Comparar as rodadas",
+      rotuloBotao: "Acompanhar recontagem",
+      to: "/recontagem",
+      tom: "neutral",
+    };
+  } else if (concluida) {
+    statusExibido = "Rodada concluída — análise necessária";
+    etapaAtual = 2;
+    acao = {
+      titulo: `Analisar o resultado da R${inventario.rodada_atual}`,
+      descricao: "A contagem terminou. Revise as divergências antes de encaminhar ou avançar.",
+      responsavel: "Analista",
+      proximaEtapa: "Encaminhar ao gestor ou gerar nova rodada",
+      rotuloBotao: "Abrir análise oficial",
+      to: "/analise-oficial",
+      tom: "amber",
+    };
+  }
+
+  const bloqueios: BloqueioCentral[] = [];
+  if (!props.snapshotGerado) bloqueios.push({ titulo: fase === "DEFINIR_ESCOPO" ? "Escopo não definido" : "Snapshot não gerado" });
+  if ((inventario.localizacoes_pendentes ?? 0) > 0) bloqueios.push({ titulo: "Localizações pendentes", quantidade: inventario.localizacoes_pendentes });
+  if ((inventario.localizacoes_em_contagem ?? 0) > 0) bloqueios.push({ titulo: "Contagens em andamento", quantidade: inventario.localizacoes_em_contagem });
+  if (etapaGestor && (inventario.divergencias_sem_decisao ?? 0) > 0) bloqueios.push({ titulo: "Divergências sem decisão", quantidade: inventario.divergencias_sem_decisao });
+  if ((inventario.recontagens_pendentes ?? 0) > 0) bloqueios.push({ titulo: "Recontagens pendentes", quantidade: inventario.recontagens_pendentes });
+
+  return (
+    <EstruturaCentral
+      inventario={inventario}
+      tipo="OFICIAL"
+      statusExibido={statusExibido}
+      acao={acao}
+      bloqueios={bloqueios}
+      etapas={["Preparar", "Snapshot", "Rodadas", "Decisão gerencial", "Finalizar"]}
+      etapaAtual={etapaAtual}
+      carregando={!encerrado && (!props.statusSnapshotCarregado || Boolean(props.carregandoPreview))}
+      erro={props.erroPreview ?? null}
+    />
+  );
+}
+
+function CentralInventarioRotativo(props: CentralInventarioProps) {
+  const { inventario } = props;
+  const fase = normalizar(inventario.fase_operacional);
+  const status = normalizar(inventario.status);
+  const encerrado = inventarioEncerrado(inventario);
+  const concluida = contagemConcluida(inventario);
+  const recontagem = ["AGUARDANDO_RECONTAGEM", "EM_RECONTAGEM", "RECONTAGEM_PENDENTE"].includes(fase);
+  const divergenciasPendentes = inventario.divergencias_sem_decisao ?? 0;
+
+  let statusExibido = "Ciclo rotativo em execução";
+  let etapaAtual = 1;
+  let acao: AcaoCentral = {
+    titulo: props.podeExecutarContagem ? "Executar localizações priorizadas" : "Acompanhar o ciclo atual",
+    descricao: "O inventário rotativo avança por cobertura das localizações e tratamento das divergências.",
+    responsavel: "Operação",
+    proximaEtapa: "Analisar divergências do ciclo",
+    rotuloBotao: props.podeExecutarContagem ? "Abrir contagem" : "Acompanhar contagem",
+    to: props.podeExecutarContagem ? "/contagem" : "/acompanhamento-contagem",
+    tom: "blue",
+  };
+
+  if (encerrado) {
+    statusExibido = status === "CANCELADO" ? "Inventário rotativo cancelado" : "Inventário rotativo encerrado";
+    etapaAtual = 4;
+    acao = {
+      titulo: "Consultar o histórico do ciclo",
+      descricao: "O processo foi encerrado e permanece disponível para rastreabilidade.",
+      responsavel: "Consulta",
+      proximaEtapa: "Hist\u00f3rico completo e auditoria",
+      rotuloBotao: "Ver hist\u00f3rico completo",
+      to: "/historico",
+      tom: "neutral",
+    };
+  } else if (fase === "DEFINIR_ESCOPO") {
+    statusExibido = "Escopo rotativo ainda não definido";
+    etapaAtual = 0;
+    acao = {
+      titulo: "Definir escopo",
+      descricao: "Selecione as localizações deste inventário para iniciar a execução do ciclo.",
+      responsavel: "Analista",
+      proximaEtapa: "Executar as localizações selecionadas",
+      rotuloBotao: "Definir escopo",
+      to: "/inventarios/$idInventario/estoque-escopo",
+      usaParams: true,
+      tom: "blue",
+    };
+  } else if (inventario.rodada_atual <= 0) {
+    statusExibido = "Ciclo rotativo ainda não preparado";
+    etapaAtual = 0;
+    acao = {
+      titulo: "Configurar o universo e abrir o ciclo",
+      descricao: "Defina o universo elegível e selecione as localizações priorizadas por risco.",
+      responsavel: "Analista",
+      proximaEtapa: "Executar as localizações do ciclo",
+      rotuloBotao: "Abrir controle rotativo",
+      to: "/ciclo-rotativo",
+      tom: "blue",
+    };
+  } else if (recontagem) {
+    statusExibido = "Recontagem rotativa pendente";
+    etapaAtual = 3;
+    acao = {
+      titulo: "Executar as recontagens solicitadas",
+      descricao: "Execute a R2 apenas nos itens enviados para recontagem. A R2 é a última rodada física do rotativo.",
+      responsavel: "Operação",
+      proximaEtapa: "Comparar R1 e R2 e consolidar o resultado, sem gerar R3",
+      rotuloBotao: "Acompanhar recontagem",
+      to: "/recontagem",
+      tom: "blue",
+    };
+  } else if (inventario.pode_finalizar || ["PRONTO_FINALIZAR", "PRONTO_PARA_FINALIZAR"].includes(fase) || (concluida && (inventario.total_divergencias ?? 0) === 0)) {
+    statusExibido = "Ciclo rotativo pronto para finalizar";
+    etapaAtual = 4;
+    acao = {
+      titulo: "Revisar e finalizar o inventário rotativo",
+      descricao: inventario.rodada_atual >= 2
+        ? "A R2 é terminal. Revise o resultado; divergências persistentes permanecem registradas como confirmadas, sem gerar R3."
+        : "A R1 terminou sem recontagem pendente. Revise as justificativas e o resultado antes do encerramento.",
+      responsavel: "Responsável pelo rotativo",
+      proximaEtapa: "Consultar o resultado final do ciclo",
+      rotuloBotao: "Abrir análise cíclica",
+      to: "/analise-ciclica",
+      tom: "emerald",
+    };
+  } else if (divergenciasPendentes > 0 || (concluida && (inventario.total_divergencias ?? 0) > 0)) {
+    statusExibido = "Divergências do ciclo aguardando decisão";
+    etapaAtual = 2;
+    acao = {
+      titulo: `Tratar ${divergenciasPendentes || inventario.total_divergencias} divergência${(divergenciasPendentes || inventario.total_divergencias) === 1 ? "" : "s"}`,
+      descricao: "Na Análise Cíclica, escolha RECONTAR para enviar somente o item divergente à R2, ou JUSTIFICAR e registre o motivo para encerrar sem recontagem desse item.",
+      responsavel: "Analista responsável pelo rotativo",
+      proximaEtapa: "Executar a R2 dos itens marcados para recontagem ou revisar o resultado da R1",
+      rotuloBotao: "Analisar divergências",
+      to: "/analise-ciclica",
+      tom: "blue",
+    };
+  }
+
+  const bloqueios: BloqueioCentral[] = [];
+  if (fase === "DEFINIR_ESCOPO") bloqueios.push({ titulo: "Escopo rotativo não definido" });
+  else if (inventario.rodada_atual <= 0) bloqueios.push({ titulo: "Ciclo ou universo não configurado" });
+  if ((inventario.localizacoes_pendentes ?? 0) > 0) bloqueios.push({ titulo: "Localizações do ciclo pendentes", quantidade: inventario.localizacoes_pendentes });
+  if ((inventario.localizacoes_em_contagem ?? 0) > 0) bloqueios.push({ titulo: "Localizações em contagem", quantidade: inventario.localizacoes_em_contagem });
+  if (divergenciasPendentes > 0) bloqueios.push({ titulo: "Divergências sem decisão rotativa", quantidade: divergenciasPendentes });
+  if ((inventario.recontagens_pendentes ?? 0) > 0) bloqueios.push({ titulo: "Recontagens rotativas pendentes", quantidade: inventario.recontagens_pendentes });
+
+  return (
+    <EstruturaCentral
+      inventario={inventario}
+      tipo="ROTATIVO"
+      statusExibido={statusExibido}
+      acao={acao}
+      bloqueios={bloqueios}
+      etapas={["Definir escopo", "Executar R1", "Decidir divergências", "Recontar R2", "Concluir ciclo"]}
+      etapaAtual={etapaAtual}
+    />
+  );
+}
+
+export function PainelFluxoInventario(props: CentralInventarioProps) {
+  return props.inventario.tipo === "OFICIAL" ? (
+    <CentralInventarioOficial {...props} />
+  ) : (
+    <CentralInventarioRotativo {...props} />
+  );
+}

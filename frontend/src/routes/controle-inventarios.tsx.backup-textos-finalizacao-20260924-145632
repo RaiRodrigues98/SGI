@@ -1,0 +1,2647 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  BarChart3,
+  Boxes,
+  Eye,
+  Plus,
+  RefreshCcw,
+  ShieldCheck,
+  X,
+  ClipboardList,
+} from "lucide-react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { Button } from "@/components/ui/button";
+import { obterUsuarioSalvo } from "@/services/authService";
+import {
+  criarInventario,
+  listarClientesDisponiveis,
+  listarInventariosCentral,
+} from "@/services/inventarioService";
+
+import {
+  abrirCicloRotativo,
+  configurarUniversoRotativo,
+  consultarCicloRotativoAtual,
+  consultarStatusUniversoRotativo,
+  type CicloRotativo,
+  type UniversoRotativoStatus,
+} from "@/services/rotativoService";
+import type {
+  ClienteDisponivelInventario,
+  InventarioCriacaoEntrada,
+  InventarioResumo,
+  TipoInventario,
+} from "@/types/inventory";
+
+export const Route = createFileRoute("/controle-inventarios")({
+  head: () => ({
+    meta: [{ title: "Controle de Invent\u00e1rios \u2014 SGI" }],
+  }),
+  component: ControleInventariosPage,
+});
+
+type FiltroTipo = "TODOS" | TipoInventario;
+
+type FiltroPendencias =
+  | "TODAS"
+  | "COM_PENDENCIAS"
+  | "SEM_PENDENCIAS";
+
+type FiltroPeriodo =
+  | "QUALQUER"
+  | "HOJE"
+  | "ULTIMOS_7_DIAS"
+  | "ULTIMOS_30_DIAS"
+  | "ESTE_MES"
+  | "PERSONALIZADO";
+
+function rotuloFaseFiltro(valor: string) {
+  const rotulos: Record<string, string> = {
+    DEFINIR_ESCOPO: "Definir escopo",
+    AGUARDANDO_CONTAGEM: "Aguardando contagem",
+    AGUARDANDO_RECONTAGEM: "Aguardando recontagem",
+    EM_RECONTAGEM: "Em recontagem",
+    PROXIMA_RODADA_DISPONIVEL: "Proxima rodada disponivel",
+    EM_CONTAGEM: "Em contagem",
+    AGUARDANDO_GESTOR: "Aguardando gestor",
+    AGUARDANDO_DECISAO: "Aguardando decisão",
+    RECONTAGEM_PENDENTE: "Recontagem pendente",
+    PRONTO_FINALIZAR: "Pronto para finalizar",
+    PRONTO_PARA_FINALIZAR: "Pronto para finalizar",
+    FINALIZADO: "Finalizado",
+    CANCELADO: "Cancelado",
+  };
+
+  if (rotulos[valor]) {
+    return rotulos[valor];
+  }
+
+  const texto = valor
+    .toLocaleLowerCase("pt-BR")
+    .replace(/_/g, " ");
+
+  return (
+    texto.charAt(0).toLocaleUpperCase("pt-BR") +
+    texto.slice(1)
+  );
+}
+
+const STATUS_INVENTARIO_TERMINAIS = new Set(["FINALIZADO", "ENCERRADO", "CANCELADO"]);
+
+function normalizarTexto(valor: string | null | undefined): string {
+  return String(valor ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+function clienteEhOperacional(
+  cliente: string | null | undefined,
+): boolean {
+  const nome = normalizarTexto(cliente);
+
+  return (
+    nome.includes("ENDRESS+HAUSER") ||
+    nome === "UM GRAU E MEIO"
+  );
+}
+
+
+function estaAguardandoGestor(inventario: InventarioResumo): boolean {
+  return (
+    inventario.tipo === "OFICIAL" &&
+    inventario.em_analise_gestor &&
+    !STATUS_INVENTARIO_TERMINAIS.has(normalizarTexto(inventario.status))
+  );
+}
+
+function possuiResultadoFinal(inventario: InventarioResumo): boolean {
+  return (
+    inventario.tipo === "OFICIAL" &&
+    normalizarTexto(inventario.status) === "FINALIZADO"
+  );
+}
+
+interface NovoInventarioForm {
+  codigo_inventario: string;
+  tipo: TipoInventario;
+  cliente_id: string;
+  cliente: string;
+  descricao: string;
+  armazem: string;
+}
+
+const formularioInicial: NovoInventarioForm = {
+  codigo_inventario: "",
+  tipo: "ROTATIVO",
+  cliente_id: "",
+  cliente: "",
+  descricao: "",
+  armazem: "",
+};
+
+const inputClass =
+  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60";
+
+function ControleInventariosPage() {
+  const usuarioAtual = obterUsuarioSalvo();
+
+  const permissoesEfetivasUsuario = new Set(
+    (usuarioAtual?.permissoes ?? [])
+      .map((permissao) =>
+        typeof permissao === "string"
+          ? permissao
+          : permissao.codigo,
+      )
+      .filter(Boolean),
+  );
+
+  const podeExecutarContagemUsuario =
+    permissoesEfetivasUsuario.has("CONTAGEM_EXECUTAR") &&
+    ![
+      "ANALISE_VISUALIZAR",
+      "CONFIGURACAO_EDITAR",
+      "CONFIGURACAO_VISUALIZAR",
+      "GESTOR_DECIDIR",
+      "INVENTARIO_CRIAR",
+      "INVENTARIO_FINALIZAR",
+      "INVENTARIO_ROTATIVO_DECIDIR",
+      "PLANO_ACAO_GERENCIAR",
+      "PLANO_ACAO_VISUALIZAR",
+      "RODADA_GERAR",
+      "USUARIO_GERENCIAR",
+    ].some((permissao) =>
+      permissoesEfetivasUsuario.has(permissao),
+    );
+
+  const navigate = useNavigate();
+
+  const [inventarios, setInventarios] = useState<InventarioResumo[]>([]);
+  // ESTADO_PAGINACAO_CENTRAL_SGI_V1
+  const [inventariosAtivos, setInventariosAtivos] = useState<InventarioResumo[]>([]);
+  const [statusDisponiveis, setStatusDisponiveis] = useState<string[]>([]);
+  const [clientesFiltro, setClientesFiltro] = useState<Array<{ id: number; nome: string }>>([]);
+  const [fasesDisponiveis, setFasesDisponiveis] = useState<string[]>([]);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
+  const [proximoCodigo, setProximoCodigo] = useState("");
+  const [totais, setTotais] = useState({
+    preparacao: 0,
+    execucao: 0,
+    aguardandoDecisao: 0,
+    recontagem: 0,
+    prontoFinalizar: 0,
+    encerrados: 0,
+  });
+  const [clientesDisponiveis, setClientesDisponiveis] = useState<
+    ClienteDisponivelInventario[]
+  >([]);
+  const [carregandoClientes, setCarregandoClientes] = useState(false);
+  const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const [pesquisa, setPesquisa] = useState("");
+  const [tipo, setTipo] = useState<FiltroTipo>("TODOS");
+  const [status, setStatus] = useState("TODOS");
+  const [fase, setFase] = useState("ATIVAS");
+
+  const [clienteFiltro, setClienteFiltro] = useState("");
+
+  const [pendenciasFiltro, setPendenciasFiltro] =
+    useState<FiltroPendencias>("TODAS");
+
+  const [periodoFiltro, setPeriodoFiltro] =
+    useState<FiltroPeriodo>("QUALQUER");
+
+  const [dataInicial, setDataInicial] = useState("");
+  const [dataFinal, setDataFinal] = useState("");
+
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [itensPorPagina, setItensPorPagina] = useState(25);
+
+  const [modalAberto, setModalAberto] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erroFormulario, setErroFormulario] = useState<string | null>(null);
+  const [sucesso, setSucesso] = useState<string | null>(null);
+
+  const [formulario, setFormulario] =
+    useState<NovoInventarioForm>(formularioInicial);
+
+  const [cicloRotativo, setCicloRotativo] = useState<CicloRotativo | null>(
+    null,
+  );
+
+  const [consultandoCiclo, setConsultandoCiclo] = useState(false);
+
+  const [abrindoCiclo, setAbrindoCiclo] = useState(false);
+
+  const [erroCiclo, setErroCiclo] = useState<string | null>(null);
+
+  const [universoRotativo, setUniversoRotativo] =
+    useState<UniversoRotativoStatus | null>(null);
+
+  const [consultandoUniverso, setConsultandoUniverso] = useState(false);
+
+  const [erroUniverso, setErroUniverso] = useState<string | null>(null);
+
+  const [sincronizandoUniverso, setSincronizandoUniverso] = useState(false);
+
+  async function carregarCicloRotativoAtual(
+    clienteId: number,
+    armazem: string,
+  ) {
+    setConsultandoCiclo(true);
+    setErroCiclo(null);
+
+    try {
+      const resposta = await consultarCicloRotativoAtual(clienteId, armazem);
+
+      setCicloRotativo(resposta.possui_ciclo_aberto ? resposta.ciclo : null);
+    } catch (falha: unknown) {
+      setCicloRotativo(null);
+
+      setErroCiclo(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível consultar o ciclo rotativo.",
+      );
+    } finally {
+      setConsultandoCiclo(false);
+    }
+  }
+
+  async function carregarStatusUniversoRotativo(
+    clienteId: number,
+    armazem: string,
+  ) {
+    setConsultandoUniverso(true);
+    setErroUniverso(null);
+
+    try {
+      const resposta = await consultarStatusUniversoRotativo(
+        clienteId,
+        armazem,
+      );
+
+      setUniversoRotativo(resposta);
+    } catch (falha: unknown) {
+      setUniversoRotativo(null);
+
+      setErroUniverso(
+        falha instanceof Error
+          ? falha.message
+          : "N?o foi poss?vel consultar o universo rotativo.",
+      );
+    } finally {
+      setConsultandoUniverso(false);
+    }
+  }
+
+  const carregarInventarios = useCallback(async (
+    silencioso = false,
+    signal?: AbortSignal,
+  ) => {
+    if (silencioso) setAtualizando(true);
+    else setCarregando(true);
+
+    try {
+      const dados = await listarInventariosCentral({
+        pagina: paginaAtual,
+        por_pagina: itensPorPagina,
+        pesquisa: pesquisa.trim() || undefined,
+        tipo: tipo === "TODOS" ? undefined : tipo,
+        status: status === "TODOS" ? undefined : status,
+        cliente_id: clienteFiltro ? Number(clienteFiltro) : undefined,
+        fase,
+        pendencias: pendenciasFiltro,
+        periodo: periodoFiltro,
+        data_inicial: dataInicial || undefined,
+        data_final: dataFinal || undefined,
+      }, signal);
+
+      setInventarios(dados.itens);
+      setInventariosAtivos(dados.inventarios_ativos);
+      setStatusDisponiveis(dados.status_disponiveis);
+      setClientesFiltro(dados.clientes_filtro);
+      setFasesDisponiveis(dados.fases_disponiveis);
+      setTotalRegistros(dados.total_registros);
+      setTotalPaginas(dados.total_paginas);
+      setProximoCodigo(dados.proximo_codigo);
+      setTotais({
+        preparacao: dados.totais.preparacao,
+        execucao: dados.totais.execucao,
+        aguardandoDecisao: dados.totais.aguardando_decisao,
+        recontagem: dados.totais.recontagem,
+        prontoFinalizar: dados.totais.pronto_finalizar,
+        encerrados: dados.totais.encerrados,
+      });
+      setPaginaAtual((atual) => atual === dados.pagina ? atual : dados.pagina);
+      setErro(null);
+    } catch (falha: unknown) {
+      if (falha instanceof DOMException && falha.name === "AbortError") return;
+      setErro(falha instanceof Error ? falha.message : "Não foi possível carregar os inventários.");
+    } finally {
+      if (!signal?.aborted) {
+        setCarregando(false);
+        setAtualizando(false);
+      }
+    }
+  }, [
+    paginaAtual, itensPorPagina, pesquisa, tipo, status, fase,
+    clienteFiltro, pendenciasFiltro, periodoFiltro, dataInicial, dataFinal,
+  ]);
+
+  const carregarClientes = useCallback(async () => {
+    setCarregandoClientes(true);
+
+    try {
+      const dados = await listarClientesDisponiveis();
+      setClientesDisponiveis(dados);
+    } catch (falha: unknown) {
+      setErroFormulario(
+        falha instanceof Error
+          ? falha.message
+          : "N?o foi poss?vel carregar os clientes.",
+      );
+    } finally {
+      setCarregandoClientes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregarClientes();
+  }, [carregarClientes]);
+
+
+  const filtrosAtivos = useMemo(() => {
+    const ativos: Array<{
+      chave: string;
+      rotulo: string;
+      limpar: () => void;
+    }> = [];
+
+    const formatarDataFiltro = (
+      valor: string,
+    ) => {
+      if (!valor) {
+        return "";
+      }
+
+      const partes = valor.split("-");
+
+      if (partes.length !== 3) {
+        return valor;
+      }
+
+      const [ano, mes, dia] = partes;
+
+      return `${dia}/${mes}/${ano}`;
+    };
+
+    if (clienteFiltro) {
+      const clienteSelecionado =
+        clientesFiltro.find(
+          (cliente) =>
+            String(cliente.id) ===
+            clienteFiltro,
+        );
+
+      ativos.push({
+        chave: "cliente",
+        rotulo:
+          clienteSelecionado?.nome ??
+          `Cliente #${clienteFiltro}`,
+        limpar: () => {
+          setClienteFiltro("");
+        },
+      });
+    }
+
+    if (tipo !== "TODOS") {
+      ativos.push({
+        chave: "tipo",
+        rotulo:
+          tipo === "OFICIAL"
+            ? "Oficial"
+            : "Rotativo",
+        limpar: () => {
+          setTipo("TODOS");
+        },
+      });
+    }
+
+    if (fase !== "ATIVAS") {
+      const rotulosFase: Record<
+        string,
+        string
+      > = {
+        TODAS: "Todas as fases",
+        EM_EXECUCAO:
+          "Em execu\u00e7\u00e3o",
+        AGUARDANDO_DECISAO_GERAL:
+          "Aguardando decis\u00e3o",
+        ENCERRADOS:
+          "Encerrados",
+      };
+
+      ativos.push({
+        chave: "fase",
+        rotulo:
+          rotulosFase[fase] ??
+          rotuloFaseFiltro(fase),
+        limpar: () => {
+          setFase("ATIVAS");
+        },
+      });
+    }
+
+    if (
+      pendenciasFiltro !== "TODAS"
+    ) {
+      ativos.push({
+        chave: "pendencias",
+        rotulo:
+          pendenciasFiltro ===
+          "COM_PENDENCIAS"
+            ? "Com pend\u00eancias"
+            : "Sem pend\u00eancias",
+        limpar: () => {
+          setPendenciasFiltro("TODAS");
+        },
+      });
+    }
+
+    if (
+      periodoFiltro !== "QUALQUER"
+    ) {
+      let rotuloPeriodo =
+        "Per\u00edodo";
+
+      switch (periodoFiltro) {
+        case "HOJE":
+          rotuloPeriodo = "Hoje";
+          break;
+
+        case "ULTIMOS_7_DIAS":
+          rotuloPeriodo =
+            "\u00daltimos 7 dias";
+          break;
+
+        case "ULTIMOS_30_DIAS":
+          rotuloPeriodo =
+            "\u00daltimos 30 dias";
+          break;
+
+        case "ESTE_MES":
+          rotuloPeriodo =
+            "Este m\u00eas";
+          break;
+
+        case "PERSONALIZADO": {
+          const inicio =
+            formatarDataFiltro(
+              dataInicial,
+            );
+
+          const fim =
+            formatarDataFiltro(
+              dataFinal,
+            );
+
+          if (inicio && fim) {
+            rotuloPeriodo =
+              `${inicio} at\u00e9 ${fim}`;
+          } else if (inicio) {
+            rotuloPeriodo =
+              `A partir de ${inicio}`;
+          } else if (fim) {
+            rotuloPeriodo =
+              `At\u00e9 ${fim}`;
+          } else {
+            rotuloPeriodo =
+              "Per\u00edodo personalizado";
+          }
+
+          break;
+        }
+
+        default:
+          break;
+      }
+
+      ativos.push({
+        chave: "periodo",
+        rotulo: rotuloPeriodo,
+        limpar: () => {
+          setPeriodoFiltro(
+            "QUALQUER",
+          );
+          setDataInicial("");
+          setDataFinal("");
+        },
+      });
+    }
+
+    return ativos;
+  }, [
+    clienteFiltro,
+    clientesFiltro,
+    tipo,
+    fase,
+    pendenciasFiltro,
+    periodoFiltro,
+    dataInicial,
+    dataFinal,
+  ]);
+
+  const paginaExibida = Math.min(paginaAtual, totalPaginas);
+  const indiceInicial = (paginaExibida - 1) * itensPorPagina;
+  const inventariosPaginados = inventarios;
+  const primeiroRegistro = totalRegistros === 0 ? 0 : indiceInicial + 1;
+  const ultimoRegistro = Math.min(indiceInicial + inventarios.length, totalRegistros);
+
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [
+    pesquisa, tipo, status, fase, clienteFiltro, pendenciasFiltro,
+    periodoFiltro, dataInicial, dataFinal, itensPorPagina,
+  ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const atraso = pesquisa.trim() ? 300 : 0;
+    const timer = window.setTimeout(() => {
+      void carregarInventarios(false, controller.signal);
+    }, atraso);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [carregarInventarios]);
+
+  const inventariosAtivosNoArmazem = useMemo(() => {
+    const armazemSelecionado = normalizarTexto(formulario.armazem);
+
+    if (!armazemSelecionado) {
+      return [];
+    }
+
+    return inventariosAtivos.filter((inventario) => {
+      const mesmoArmazem =
+        normalizarTexto(inventario.armazem) === armazemSelecionado;
+
+      const statusNormalizado = normalizarTexto(inventario.status);
+
+      const inventarioAtivo =
+        !STATUS_INVENTARIO_TERMINAIS.has(statusNormalizado);
+
+      return mesmoArmazem && inventarioAtivo;
+    });
+  }, [formulario.armazem, inventariosAtivos]);
+
+  const inventarioAtivoNoArmazem = inventariosAtivosNoArmazem[0] ?? null;
+
+  function abrirNovoInventario() {
+    setFormulario({
+      ...formularioInicial,
+      codigo_inventario: proximoCodigo,
+    });
+
+    setErroFormulario(null);
+    setSucesso(null);
+    setModalAberto(true);
+
+    if (clientesDisponiveis.length === 0) {
+      void carregarClientes();
+    }
+  }
+
+  useEffect(() => {
+    if (!modalAberto) {
+      return;
+    }
+
+    if (formulario.tipo !== "ROTATIVO") {
+      setCicloRotativo(null);
+      setErroCiclo(null);
+      setConsultandoCiclo(false);
+
+      setUniversoRotativo(null);
+      setErroUniverso(null);
+      setConsultandoUniverso(false);
+
+      return;
+    }
+
+    const clienteId = Number(formulario.cliente_id);
+
+    const armazem = formulario.armazem.trim();
+
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !armazem) {
+      setCicloRotativo(null);
+      setErroCiclo(null);
+
+      setUniversoRotativo(null);
+      setErroUniverso(null);
+
+      return;
+    }
+
+    void carregarCicloRotativoAtual(clienteId, armazem);
+
+    void carregarStatusUniversoRotativo(clienteId, armazem);
+  }, [modalAberto, formulario.tipo, formulario.cliente_id, formulario.armazem]);
+
+  function fecharModal() {
+    if (salvando) return;
+
+    setModalAberto(false);
+    setErroFormulario(null);
+  }
+
+  function atualizarCampo<K extends keyof NovoInventarioForm>(
+    campo: K,
+    valor: NovoInventarioForm[K],
+  ) {
+    setFormulario((anterior) => ({
+      ...anterior,
+      [campo]: valor,
+    }));
+  }
+
+  async function sincronizarUniversoDoFormulario() {
+    const clienteId = Number(formulario.cliente_id);
+
+    const armazem = formulario.armazem.trim().toUpperCase();
+
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !armazem) {
+      setErroUniverso("Selecione um cliente antes de configurar o universo.");
+      return;
+    }
+
+    setSincronizandoUniverso(true);
+    setErroUniverso(null);
+    setErroCiclo(null);
+
+    try {
+      await configurarUniversoRotativo({
+        cliente_id: clienteId,
+        armazem,
+      });
+
+      await carregarStatusUniversoRotativo(clienteId, armazem);
+    } catch (falha: unknown) {
+      setErroUniverso(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível sincronizar o universo rotativo.",
+      );
+    } finally {
+      setSincronizandoUniverso(false);
+    }
+  }
+
+  async function abrirCicloDoFormulario() {
+    const clienteId = Number(formulario.cliente_id);
+
+    const armazem = formulario.armazem.trim().toUpperCase();
+
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !armazem) {
+      setErroCiclo("Selecione um cliente antes de abrir o ciclo.");
+      return;
+    }
+
+    if (consultandoUniverso || !universoRotativo) {
+      setErroCiclo(
+        "Aguarde a consulta do universo rotativo antes de abrir o ciclo.",
+      );
+      return;
+    }
+
+    if (!universoRotativo.configurado) {
+      setErroCiclo("Configure o universo rotativo antes de abrir o ciclo.");
+      return;
+    }
+
+    if (!universoRotativo.sincronizado) {
+      setErroCiclo(
+        `O universo rotativo possui ${
+          universoRotativo.total_novas_localizacoes
+        } nova(s) localização(ões). Sincronize o universo antes de abrir o ciclo.`,
+      );
+      return;
+    }
+
+    setAbrindoCiclo(true);
+    setErroCiclo(null);
+
+    try {
+      await abrirCicloRotativo({
+        cliente_id: clienteId,
+        armazem,
+      });
+
+      await carregarCicloRotativoAtual(clienteId, armazem);
+
+      await carregarStatusUniversoRotativo(clienteId, armazem);
+    } catch (falha: unknown) {
+      setErroCiclo(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível abrir o ciclo rotativo.",
+      );
+    } finally {
+      setAbrindoCiclo(false);
+    }
+  }
+
+  async function salvarInventario(evento: FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+
+    setErroFormulario(null);
+    setSucesso(null);
+
+    const clienteId = Number(formulario.cliente_id);
+
+    if (!Number.isInteger(clienteId) || clienteId <= 0) {
+      setErroFormulario("Selecione um cliente.");
+      return;
+    }
+
+    if (!formulario.cliente.trim()) {
+      setErroFormulario("Selecione um cliente.");
+      return;
+    }
+
+    if (!formulario.armazem.trim()) {
+      setErroFormulario("O cliente selecionado não possui armazém válido.");
+      return;
+    }
+
+    if (inventarioAtivoNoArmazem) {
+      setErroFormulario(
+        `O armazém ${formulario.armazem.trim().toUpperCase()} já possui o inventário ${
+          inventarioAtivoNoArmazem.codigo_inventario
+        } em andamento, com status ${
+          inventarioAtivoNoArmazem.status
+        }. Finalize ou cancele esse inventário antes de criar outro.`,
+      );
+      return;
+    }
+
+    if (formulario.tipo === "ROTATIVO" && !cicloRotativo) {
+      setErroFormulario("Inventario ROTATIVO exige um ciclo rotativo aberto.");
+      return;
+    }
+
+    const entrada: InventarioCriacaoEntrada = {
+      codigo_inventario: formulario.codigo_inventario.trim(),
+      tipo: formulario.tipo,
+      cliente_id: clienteId,
+      cliente: formulario.cliente.trim(),
+      descricao: formulario.descricao.trim() || null,
+      armazem: formulario.armazem.trim().toUpperCase(),
+    };
+
+    setSalvando(true);
+
+    try {
+      const inventarioCriado = await criarInventario(entrada);
+
+      setFormulario(formularioInicial);
+      setModalAberto(false);
+
+      await navigate({
+        to: "/inventarios/$idInventario",
+        params: {
+          idInventario: String(inventarioCriado.id_inventario),
+        },
+      });
+    } catch (falha: unknown) {
+      setErroFormulario(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível criar o inventário.",
+      );
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  function limparFiltros() {
+    setPesquisa("");
+    setTipo("TODOS");
+    setStatus("TODOS");
+    setFase("ATIVAS");
+    setClienteFiltro("");
+    setPendenciasFiltro("TODAS");
+    setPeriodoFiltro("QUALQUER");
+    setDataInicial("");
+    setDataFinal("");
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-[1500px] space-y-5 p-3 sm:p-5 lg:p-6">
+      <header className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 shadow-xs lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Boxes
+              className="size-6 text-primary"
+              aria-hidden="true"
+            />
+          </div>
+
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">
+              {"Central de invent\u00e1rios"}
+            </h1>
+
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              {
+                "Acompanhe o escopo, a execu\u00e7\u00e3o das contagens e as pend\u00eancias de cada invent\u00e1rio."
+              }
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void carregarInventarios(true)}
+            disabled={atualizando || carregando}
+          >
+            <RefreshCcw
+              className={atualizando ? "animate-spin" : ""}
+              aria-hidden="true"
+            />
+            Atualizar
+          </Button>
+
+          <Button type="button" onClick={abrirNovoInventario}>
+            <Plus aria-hidden="true" />
+            {"Novo invent\u00e1rio"}
+          </Button>
+        </div>
+      </header>
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <Resumo
+          titulo={"Em prepara\u00e7\u00e3o"}
+          valor={totais.preparacao}
+          ativo={fase === "DEFINIR_ESCOPO"}
+          onClick={() => setFase("DEFINIR_ESCOPO")}
+        />
+
+        <Resumo
+          titulo={"Em execu\u00e7\u00e3o"}
+          valor={totais.execucao}
+          ativo={fase === "EM_EXECUCAO"}
+          onClick={() => setFase("EM_EXECUCAO")}
+        />
+
+        <Resumo
+          titulo={"Aguardando decis\u00e3o"}
+          valor={totais.aguardandoDecisao}
+          destaque={totais.aguardandoDecisao > 0}
+          ativo={
+            fase === "AGUARDANDO_DECISAO_GERAL"
+          }
+          onClick={() =>
+            setFase("AGUARDANDO_DECISAO_GERAL")
+          }
+        />
+
+        <Resumo
+          titulo="Recontagem"
+          valor={totais.recontagem}
+          destaque={totais.recontagem > 0}
+          ativo={fase === "RECONTAGEM_PENDENTE"}
+          onClick={() =>
+            setFase("RECONTAGEM_PENDENTE")
+          }
+        />
+
+        <Resumo
+          titulo="Pronto para finalizar"
+          valor={totais.prontoFinalizar}
+          destaque={totais.prontoFinalizar > 0}
+          ativo={fase === "PRONTO_FINALIZAR"}
+          onClick={() =>
+            setFase("PRONTO_FINALIZAR")
+          }
+        />
+
+        <Resumo
+          titulo="Encerrados"
+          valor={totais.encerrados}
+          ativo={fase === "ENCERRADOS"}
+          onClick={() => setFase("ENCERRADOS")}
+        />
+      </section>
+
+      {sucesso && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {sucesso}
+        </div>
+      )}
+
+      {erro && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {erro}
+        </div>
+      )}
+
+      <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-xs">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="font-bold text-primary">
+              {"Fila operacional"}
+            </h2>
+
+            <p className="text-sm text-muted-foreground">
+              {
+                "Os invent\u00e1rios que exigem decis\u00e3o aparecem primeiro."
+              }
+            </p>
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {totalRegistros} registro(s)
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_170px_220px_190px_190px_auto]">
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">
+              Cliente
+            </span>
+
+            <select
+              value={clienteFiltro}
+              onChange={(evento) =>
+                setClienteFiltro(
+                  evento.target.value,
+                )
+              }
+              className={inputClass}
+            >
+              <option value="">
+                Todos os clientes
+              </option>
+
+              {clientesFiltro.map((cliente) => (
+                <option
+                  key={cliente.id}
+                  value={String(cliente.id)}
+                >
+                  {cliente.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">
+              Tipo
+            </span>
+
+            <select
+              value={tipo}
+              onChange={(evento) =>
+                setTipo(
+                  evento.target.value as FiltroTipo,
+                )
+              }
+              className={inputClass}
+            >
+              <option value="TODOS">
+                Todos
+              </option>
+
+              <option value="ROTATIVO">
+                Rotativo
+              </option>
+
+              <option value="OFICIAL">
+                Oficial
+              </option>
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">
+              Fase atual
+            </span>
+
+            <select
+              value={fase}
+              onChange={(evento) =>
+                setFase(
+                  evento.target.value,
+                )
+              }
+              className={inputClass}
+            >
+              <option value="ATIVAS">
+                Fases ativas
+              </option>
+
+              <option value="TODAS">
+                Todas
+              </option>
+
+              <option value="EM_EXECUCAO">
+                {"Em execu\u00e7\u00e3o"}
+              </option>
+
+              <option value="AGUARDANDO_DECISAO_GERAL">
+                {"Aguardando decis\u00e3o"}
+              </option>
+
+              <option value="ENCERRADOS">
+                Encerrados
+              </option>
+
+              {fasesDisponiveis
+                .filter(
+                  (faseDisponivel) =>
+                    ![
+                      "ATIVAS",
+                      "TODAS",
+                      "EM_EXECUCAO",
+                      "AGUARDANDO_DECISAO_GERAL",
+                      "ENCERRADOS",
+                    ].includes(
+                      faseDisponivel,
+                    ),
+                )
+                .map(
+                  (faseDisponivel) => (
+                    <option
+                      key={faseDisponivel}
+                      value={faseDisponivel}
+                    >
+                      {rotuloFaseFiltro(
+                        faseDisponivel,
+                      )}
+                    </option>
+                  ),
+                )}
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">
+              {"Pend\u00eancias"}
+            </span>
+
+            <select
+              value={pendenciasFiltro}
+              onChange={(evento) =>
+                setPendenciasFiltro(
+                  evento.target
+                    .value as FiltroPendencias,
+                )
+              }
+              className={inputClass}
+            >
+              <option value="TODAS">
+                Todas
+              </option>
+
+              <option value="COM_PENDENCIAS">
+                {"Com pend\u00eancias"}
+              </option>
+
+              <option value="SEM_PENDENCIAS">
+                {"Sem pend\u00eancias"}
+              </option>
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-muted-foreground">
+              Data
+            </span>
+
+            <select
+              value={periodoFiltro}
+              onChange={(evento) => {
+                const novoPeriodo =
+                  evento.target
+                    .value as FiltroPeriodo;
+
+                setPeriodoFiltro(
+                  novoPeriodo,
+                );
+
+                if (
+                  novoPeriodo !==
+                  "PERSONALIZADO"
+                ) {
+                  setDataInicial("");
+                  setDataFinal("");
+                }
+              }}
+              className={inputClass}
+            >
+              <option value="QUALQUER">
+                {"Qualquer per\u00edodo"}
+              </option>
+
+              <option value="HOJE">
+                Hoje
+              </option>
+
+              <option value="ULTIMOS_7_DIAS">
+                {"\u00daltimos 7 dias"}
+              </option>
+
+              <option value="ULTIMOS_30_DIAS">
+                {"\u00daltimos 30 dias"}
+              </option>
+
+              <option value="ESTE_MES">
+                {"Este m\u00eas"}
+              </option>
+
+              <option value="PERSONALIZADO">
+                Personalizado
+              </option>
+            </select>
+          </label>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={limparFiltros}
+            className="self-end"
+          >
+            <X aria-hidden="true" />
+            Limpar
+          </Button>
+        </div>
+
+        {periodoFiltro === "PERSONALIZADO" && (
+          <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-2 lg:max-w-[420px]">
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-muted-foreground">
+                De
+              </span>
+
+              <input
+                type="date"
+                value={dataInicial}
+                max={dataFinal || undefined}
+                onChange={(evento) =>
+                  setDataInicial(
+                    evento.target.value,
+                  )
+                }
+                className={inputClass}
+              />
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-muted-foreground">
+                {"At\u00e9"}
+              </span>
+
+              <input
+                type="date"
+                value={dataFinal}
+                min={dataInicial || undefined}
+                onChange={(evento) =>
+                  setDataFinal(
+                    evento.target.value,
+                  )
+                }
+                className={inputClass}
+              />
+            </label>
+          </div>
+        )}
+
+        {filtrosAtivos.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 sm:flex-row sm:items-center">
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-medium text-muted-foreground">
+                {"Filtros ativos:"}
+              </span>
+
+              {filtrosAtivos.map(
+                (filtro) => (
+                  <button
+                    key={filtro.chave}
+                    type="button"
+                    onClick={
+                      filtro.limpar
+                    }
+                    title={`Remover filtro: ${filtro.rotulo}`}
+                    aria-label={`Remover filtro ${filtro.rotulo}`}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-background px-2.5 text-xs font-medium text-foreground shadow-xs transition hover:border-primary/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span>
+                      {filtro.rotulo}
+                    </span>
+
+                    <X
+                      className="size-3.5 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                  </button>
+                ),
+              )}
+            </div>
+
+            <div className="shrink-0 text-xs text-muted-foreground">
+              <strong className="font-semibold text-foreground">
+                {filtrosAtivos.length}
+              </strong>
+
+              {" "}
+
+              {filtrosAtivos.length === 1
+                ? "filtro aplicado"
+                : "filtros aplicados"}
+            </div>
+          </div>
+        )}
+
+        {carregando ? (
+          <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
+            {"Carregando invent\u00e1rios..."}
+          </div>
+        ) : totalRegistros === 0 ? (
+          <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
+            {
+              "Nenhum invent\u00e1rio encontrado para os filtros selecionados."
+            }
+          </div>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full table-fixed text-left text-sm">
+              <colgroup>
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "11%" }} />
+              </colgroup>
+              <thead className="bg-muted/50">
+                <tr>
+                  <Th>{"Invent\u00e1rio"}</Th>
+                  <Th>{"Cliente / armaz\u00e9m"}</Th>
+                  <Th>Tipo</Th>
+                  <Th>Fase atual</Th>
+                  <Th>Rodada</Th>
+                  <Th>Progresso</Th>
+                  <Th>{"Pend\u00eancias"}</Th>
+                  <Th>{"Diverg\u00eancias"}</Th>
+                  <Th>{"In\u00edcio"}</Th>
+                  <Th>{"A\u00e7\u00e3o"}</Th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {inventariosPaginados.map((inventario) => (
+                  <tr
+                    key={inventario.id_inventario}
+                    tabIndex={0}
+                    aria-label={`Abrir inventário ${inventario.codigo_inventario}`}
+                    onClick={(evento) => {
+                      const elementoClicado =
+                        evento.target as HTMLElement;
+
+                      if (
+                        elementoClicado.closest(
+                          "a, button, input, select, textarea, [role='button']",
+                        )
+                      ) {
+                        return;
+                      }
+
+                      void navigate({
+                        to: "/inventarios/$idInventario",
+                        params: {
+                          idInventario: String(
+                            inventario.id_inventario,
+                          ),
+                        },
+                      });
+                    }}
+                    onKeyDown={(evento) => {
+                      if (
+                        evento.target !==
+                        evento.currentTarget
+                      ) {
+                        return;
+                      }
+
+                      if (
+                        evento.key !== "Enter" &&
+                        evento.key !== " "
+                      ) {
+                        return;
+                      }
+
+                      evento.preventDefault();
+
+                      void navigate({
+                        to: "/inventarios/$idInventario",
+                        params: {
+                          idInventario: String(
+                            inventario.id_inventario,
+                          ),
+                        },
+                      });
+                    }}
+                    className="cursor-pointer border-t border-border transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                  >
+                    <Td>
+                      <Link
+                        to="/inventarios/$idInventario"
+                        params={{
+                          idInventario: String(
+                            inventario.id_inventario,
+                          ),
+                        }}
+                        className="whitespace-nowrap font-semibold text-primary hover:underline"
+                      >
+                        {inventario.codigo_inventario}
+                      </Link>
+
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        #{inventario.id_inventario}
+                      </div>
+
+                      {inventario.descricao && (
+                        <div className="mt-1 max-w-56 truncate text-xs text-muted-foreground">
+                          {inventario.descricao}
+                        </div>
+                      )}
+                    </Td>
+
+                    <Td>
+                      <div className="font-medium">
+                        {inventario.cliente}
+                      </div>
+
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {inventario.armazem}
+                        {" \u00b7 "}
+                        ID {inventario.cliente_id}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <TipoBadge tipo={inventario.tipo} />
+                    </Td>
+
+                    <Td>
+                      <FaseBadge
+                        fase={inventario.fase_operacional}
+                      />
+
+                      <div className="mt-1.5 text-xs text-muted-foreground">
+                        Status:{" "}
+                        {formatarStatus(inventario.status)}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <div className="font-semibold">
+                        R{inventario.rodada_atual}
+                      </div>
+
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {inventario.status_rodada
+                          ? formatarStatus(
+                              inventario.status_rodada,
+                            )
+                          : "Sem rodada"}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <ProgressoInventario
+                        inventario={inventario}
+                      />
+                    </Td>
+
+                    <Td>
+                      <PendenciasInventario
+                        inventario={inventario}
+                      />
+                    </Td>
+
+                    <Td>
+                      <DivergenciasInventario
+                        inventario={inventario}
+                      />
+                    </Td>
+
+                    <Td>
+                      {formatarData(
+                        inventario.data_hora_inicio,
+                      )}
+                    </Td>
+
+                    <Td>
+                      <div className="min-w-0 [&_a]:h-auto [&_a]:min-h-9 [&_a]:whitespace-normal [&_a]:px-2 [&_a]:text-center [&_a]:leading-tight">
+                        <AcaoInventario
+                          inventario={inventario}
+                          podeExecutarContagem={
+                            podeExecutarContagemUsuario
+                          }
+                        />
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              Mostrando{" "}
+              <strong className="text-foreground">
+                {primeiroRegistro}
+              </strong>
+              {" a "}
+              <strong className="text-foreground">
+                {ultimoRegistro}
+              </strong>
+              {" de "}
+              <strong className="text-foreground">
+                {totalRegistros}
+              </strong>
+              {" registros"}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                {"Por p\u00e1gina"}
+
+                <select
+                  value={itensPorPagina}
+                  onChange={(evento) => {
+                    setItensPorPagina(
+                      Number(evento.target.value),
+                    );
+                    setPaginaAtual(1);
+                  }}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+
+              <div className="mx-1 text-sm text-muted-foreground">
+                {"P\u00e1gina "}
+                <strong className="text-foreground">
+                  {paginaExibida}
+                </strong>
+                {" de "}
+                <strong className="text-foreground">
+                  {totalPaginas}
+                </strong>
+              </div>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setPaginaAtual((pagina) =>
+                    Math.max(1, pagina - 1),
+                  )
+                }
+                disabled={paginaExibida <= 1}
+              >
+                Anterior
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setPaginaAtual((pagina) =>
+                    Math.min(
+                      totalPaginas,
+                      pagina + 1,
+                    ),
+                  )
+                }
+                disabled={
+                  paginaExibida >= totalPaginas
+                }
+              >
+                {"Pr\u00f3xima"}
+              </Button>
+            </div>
+          </div>
+          </>
+        )}
+      </section>
+
+      {modalAberto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onMouseDown={(evento) => {
+            if (evento.target === evento.currentTarget) {
+              fecharModal();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="novo-inventario-titulo"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-background shadow-xl"
+          >
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div>
+                <h2
+                  id="novo-inventario-titulo"
+                  className="font-bold text-primary"
+                >
+                  Novo inventário
+                </h2>
+
+                <p className="text-sm text-muted-foreground">
+                  Informe os dados para iniciar um novo inventário.
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={fecharModal}
+                disabled={salvando}
+                aria-label="Fechar"
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </div>
+
+            <form onSubmit={salvarInventario}>
+              <div className="grid gap-4 p-5 sm:grid-cols-2">
+                <Campo label="Código do inventário">
+                  <input
+                    required
+                    maxLength={60}
+                    value={formulario.codigo_inventario}
+                    readOnly
+                    aria-readonly="true"
+                    className={`${inputClass} bg-muted/40`}
+                    disabled={salvando}
+                  />
+                </Campo>
+
+                <Campo label="Tipo">
+                  <select
+                    value={formulario.tipo}
+                    onChange={(evento) =>
+                      atualizarCampo(
+                        "tipo",
+                        evento.target.value as TipoInventario,
+                      )
+                    }
+                    className={inputClass}
+                    disabled={salvando}
+                  >
+                    <option value="ROTATIVO">Rotativo</option>
+                    <option value="OFICIAL">Oficial</option>
+                  </select>
+                </Campo>
+
+                <Campo label="Cliente">
+                  <select
+                    required
+                    value={
+                      formulario.cliente_id && formulario.armazem
+                        ? `${formulario.cliente_id}|${formulario.armazem}`
+                        : ""
+                    }
+                    onChange={(evento) => {
+                      const selecionado = clientesDisponiveis.find(
+                        (cliente) =>
+                          `${cliente.cliente_id}|${cliente.armazem}` ===
+                          evento.target.value,
+                      );
+
+                      if (!selecionado) {
+                        setFormulario((anterior) => ({
+                          ...anterior,
+                          cliente_id: "",
+                          cliente: "",
+                          armazem: "",
+                        }));
+
+                        return;
+                      }
+
+                      setFormulario((anterior) => ({
+                        ...anterior,
+                        cliente_id: String(selecionado.cliente_id),
+                        cliente: selecionado.cliente,
+                        armazem: selecionado.armazem,
+                      }));
+                    }}
+                    className={inputClass}
+                    disabled={
+                      salvando ||
+                      carregandoClientes ||
+                      clientesDisponiveis.length === 0
+                    }
+                  >
+                    <option value="">
+                      {carregandoClientes
+                        ? "Carregando clientes..."
+                        : "Selecione o cliente"}
+                    </option>
+
+                    {clientesDisponiveis.map((cliente) => (
+                      <option
+                        key={`${cliente.cliente_id}-${cliente.armazem}`}
+                        value={`${cliente.cliente_id}|${cliente.armazem}`}
+                      >
+                        {cliente.cliente}
+                      </option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo label="Armazém">
+                  <input
+                    required
+                    maxLength={60}
+                    value={formulario.armazem}
+                    readOnly
+                    aria-readonly="true"
+                    placeholder="Preenchido automaticamente"
+                    className={`${inputClass} bg-muted/40`}
+                    disabled={salvando}
+                  />
+                </Campo>
+
+                {inventarioAtivoNoArmazem && (
+                  <div className="sm:col-span-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                      Armazém indisponível
+                    </p>
+
+                    <p className="mt-1 text-sm text-amber-800/90 dark:text-amber-200">
+                      O armazém{" "}
+                      <strong>{formulario.armazem.trim().toUpperCase()}</strong>{" "}
+                      já possui o inventário{" "}
+                      <strong>
+                        {inventarioAtivoNoArmazem.codigo_inventario}
+                      </strong>{" "}
+                      em andamento, com status{" "}
+                      <strong>{inventarioAtivoNoArmazem.status}</strong>.
+                      Finalize ou cancele esse inventário antes de criar outro.
+                    </p>
+
+                    {inventariosAtivosNoArmazem.length > 1 && (
+                      <p className="mt-2 text-xs text-amber-800/80 dark:text-amber-200/80">
+                        Existem mais {inventariosAtivosNoArmazem.length - 1}{" "}
+                        inventário(s) ativo(s) neste armazém.
+                      </p>
+                    )}
+
+                    <Link
+                      to="/inventarios/$idInventario"
+                      params={{
+                        idInventario: String(
+                          inventarioAtivoNoArmazem.id_inventario,
+                        ),
+                      }}
+                      className="mt-3 inline-flex text-sm font-semibold text-amber-900 underline underline-offset-4 dark:text-amber-200"
+                    >
+                      Abrir inventário{" "}
+                      {inventarioAtivoNoArmazem.codigo_inventario}
+                    </Link>
+                  </div>
+                )}
+
+                {formulario.tipo === "ROTATIVO" && (
+                  <div className="sm:col-span-2 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Ciclo Rotativo obrigatório
+                        </p>
+
+                        {!formulario.cliente_id ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Selecione um cliente para consultar o ciclo
+                            rotativo.
+                          </p>
+                        ) : consultandoCiclo ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Consultando ciclo rotativo...
+                          </p>
+                        ) : cicloRotativo ? (
+                          <div className="mt-2 space-y-1 text-sm">
+                            <p className="font-medium text-foreground">
+                              {cicloRotativo.codigo_ciclo}
+                            </p>
+
+                            <p className="text-muted-foreground">
+                              Status: {cicloRotativo.status}
+                            </p>
+
+                            <p className="text-muted-foreground">
+                              Cobertura: {cicloRotativo.percentual_cobertura}%
+                              {" · "}
+                              Total: {cicloRotativo.total_localizacoes}
+                              {" · "}
+                              Pendentes:{" "}
+                              {cicloRotativo.resumo_localizacoes?.pendentes ??
+                                Math.max(
+                                  cicloRotativo.total_localizacoes -
+                                    cicloRotativo.localizacoes_contadas,
+                                  0,
+                                )}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Nenhum ciclo rotativo aberto para este cliente e
+                            armazém.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {formulario.cliente_id &&
+                          formulario.armazem &&
+                          !consultandoCiclo &&
+                          !consultandoUniverso &&
+                          !cicloRotativo &&
+                          universoRotativo &&
+                          !universoRotativo.sincronizado && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                void sincronizarUniversoDoFormulario();
+                              }}
+                              disabled={
+                                sincronizandoUniverso ||
+                                abrindoCiclo ||
+                                salvando
+                              }
+                            >
+                              {sincronizandoUniverso
+                                ? "Sincronizando..."
+                                : universoRotativo.configurado
+                                  ? "Sincronizar universo"
+                                  : "Configurar universo"}
+                            </Button>
+                          )}
+
+                        {formulario.cliente_id &&
+                          formulario.armazem &&
+                          !consultandoCiclo &&
+                          !consultandoUniverso &&
+                          !cicloRotativo &&
+                          universoRotativo?.sincronizado && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                void abrirCicloDoFormulario();
+                              }}
+                              disabled={
+                                abrindoCiclo ||
+                                sincronizandoUniverso ||
+                                salvando
+                              }
+                            >
+                              {abrindoCiclo
+                                ? "Abrindo ciclo..."
+                                : "Abrir Ciclo Rotativo"}
+                            </Button>
+                          )}
+                      </div>
+                    </div>
+
+                    {formulario.cliente_id && formulario.armazem && (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <p className="text-sm font-semibold text-foreground">
+                          Universo rotativo
+                        </p>
+
+                        {consultandoUniverso ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Consultando universo rotativo...
+                          </p>
+                        ) : erroUniverso ? (
+                          <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                            {erroUniverso}
+                          </div>
+                        ) : universoRotativo ? (
+                          <div className="mt-2 space-y-1 text-sm">
+                            <p className="text-muted-foreground">
+                              Estoque atual:{" "}
+                              {universoRotativo.total_localizacoes_estoque}
+                              {" · "}
+                              Cadastro mestre:{" "}
+                              {universoRotativo.total_localizacoes_mestre}
+                            </p>
+
+                            <p className="text-muted-foreground">
+                              Ativas:{" "}
+                              {universoRotativo.total_localizacoes_ativas}
+                              {" · "}
+                              Inativas:{" "}
+                              {universoRotativo.total_localizacoes_inativas}
+                            </p>
+
+                            <p className="text-muted-foreground">
+                              Novas localizações:{" "}
+                              {universoRotativo.total_novas_localizacoes}
+                              {" · "}
+                              Fora do estoque atual:{" "}
+                              {universoRotativo.total_fora_estoque_atual}
+                            </p>
+
+                            <p className="font-medium text-foreground">
+                              Status:{" "}
+                              {universoRotativo.sincronizado
+                                ? "Sincronizado"
+                                : "Requer sincronização"}
+                            </p>
+
+                            {!universoRotativo.sincronizado &&
+                              universoRotativo.possui_ciclo_aberto && (
+                                <p className="text-sm text-muted-foreground">
+                                  A sincronização do universo fica bloqueada
+                                  enquanto existir um ciclo rotativo aberto.
+                                </p>
+                              )}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Universo rotativo não consultado.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {erroCiclo && (
+                      <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {erroCiclo}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <Campo label="Descrição">
+                  <input
+                    maxLength={255}
+                    value={formulario.descricao}
+                    onChange={(evento) =>
+                      atualizarCampo("descricao", evento.target.value)
+                    }
+                    placeholder="Opcional"
+                    className={inputClass}
+                    disabled={salvando}
+                  />
+                </Campo>
+              </div>
+
+              {erroFormulario && (
+                <div className="mx-5 mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {erroFormulario}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={fecharModal}
+                  disabled={salvando}
+                >
+                  Cancelar
+                </Button>
+
+                <Button
+                  type="submit"
+                  disabled={
+                    salvando ||
+                    Boolean(inventarioAtivoNoArmazem) ||
+                    abrindoCiclo ||
+                    consultandoCiclo ||
+                    (formulario.tipo === "ROTATIVO" && !cicloRotativo)
+                  }
+                >
+                  {salvando ? "Criando..." : "Criar inventário"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function prioridadeFase(fase: string) {
+  const prioridades: Record<string, number> = {
+    AGUARDANDO_GESTOR: 0,
+    AGUARDANDO_DECISAO: 0,
+    RECONTAGEM_PENDENTE: 1,
+    AGUARDANDO_RECONTAGEM: 1,
+    EM_RECONTAGEM: 1,
+    PROXIMA_RODADA_DISPONIVEL: 2,
+    PRONTO_FINALIZAR: 2,
+    RODADA_CONCLUIDA: 3,
+    EM_CONTAGEM: 4,
+    AGUARDANDO_CONTAGEM: 5,
+    DEFINIR_ESCOPO: 6,
+    FINALIZADO: 7,
+    CANCELADO: 8,
+  };
+
+  return prioridades[fase] ?? 99;
+}
+
+function formatarFase(fase: string) {
+  const rotulos: Record<string, string> = {
+    DEFINIR_ESCOPO: "Definir escopo",
+    AGUARDANDO_CONTAGEM: "Aguardando contagem",
+    AGUARDANDO_RECONTAGEM: "Aguardando recontagem",
+    EM_RECONTAGEM: "Em recontagem",
+    PROXIMA_RODADA_DISPONIVEL: "Proxima rodada disponivel",
+    EM_CONTAGEM: "Em contagem",
+    AGUARDANDO_GESTOR: "Aguardando gestor",
+    AGUARDANDO_DECISAO: "Aguardando decis\u00e3o",
+    RECONTAGEM_PENDENTE: "Recontagem pendente",
+    PRONTO_FINALIZAR: "Pronto para finalizar",
+    RODADA_CONCLUIDA: "Revisar rodada",
+    FINALIZADO: "Finalizado",
+    CANCELADO: "Cancelado",
+  };
+
+  return rotulos[fase] ?? formatarStatus(fase);
+}
+
+function FaseBadge({ fase }: { fase: string }) {
+  const classes: Record<string, string> = {
+    DEFINIR_ESCOPO:
+      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300",
+
+    AGUARDANDO_CONTAGEM:
+      "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300",
+
+    EM_CONTAGEM:
+      "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300",
+
+    AGUARDANDO_RECONTAGEM:
+      "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800 dark:bg-fuchsia-950/30 dark:text-fuchsia-300",
+
+    EM_RECONTAGEM:
+      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300",
+
+    PROXIMA_RODADA_DISPONIVEL:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/30 dark:text-teal-300",
+
+    AGUARDANDO_GESTOR:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+
+    AGUARDANDO_DECISAO:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+
+    RECONTAGEM_PENDENTE:
+      "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300",
+
+    PRONTO_FINALIZAR:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300",
+
+    RODADA_CONCLUIDA:
+      "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/30 dark:text-teal-300",
+
+    FINALIZADO:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300",
+
+    CANCELADO:
+      "border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+  };
+
+  const classe =
+    classes[fase] ??
+    "border-border bg-muted text-muted-foreground";
+
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${classe}`}
+    >
+      {formatarFase(fase)}
+    </span>
+  );
+}
+
+function ProgressoInventario({
+  inventario,
+}: {
+  inventario: InventarioResumo;
+}) {
+  const percentual = Math.max(
+    0,
+    Math.min(
+      100,
+      Number(inventario.percentual_progresso) || 0,
+    ),
+  );
+
+  if (inventario.total_localizacoes === 0) {
+    return (
+      <div className="min-w-0 text-xs text-muted-foreground">
+        {"Escopo ainda n\u00e3o definido"}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full min-w-0 space-y-1.5">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-foreground">
+          {inventario.localizacoes_concluidas}/
+          {inventario.total_localizacoes}
+        </span>
+
+        <span className="text-muted-foreground">
+          {percentual.toLocaleString("pt-BR", {
+            maximumFractionDigits: 1,
+          })}
+          %
+        </span>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${percentual}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PendenciasInventario({
+  inventario,
+}: {
+  inventario: InventarioResumo;
+}) {
+  if (inventario.total_localizacoes === 0) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {"Definir localiza\u00e7\u00f5es"}
+      </span>
+    );
+  }
+
+  if (
+    inventario.localizacoes_pendentes === 0 &&
+    inventario.localizacoes_em_contagem === 0
+  ) {
+    return (
+      <span className="text-xs font-medium text-emerald-700">
+        {"Sem pend\u00eancias"}
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-1 text-xs">
+      {inventario.localizacoes_pendentes > 0 && (
+        <div className="font-medium text-amber-700 dark:text-amber-300">
+          {inventario.localizacoes_pendentes} aguardando
+        </div>
+      )}
+
+      {inventario.localizacoes_em_contagem > 0 && (
+        <div className="font-medium text-violet-700 dark:text-violet-300">
+          {inventario.localizacoes_em_contagem} em contagem
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DivergenciasInventario({
+  inventario,
+}: {
+  inventario: InventarioResumo;
+}) {
+  const faseTerminal = [
+    "FINALIZADO",
+    "CANCELADO",
+  ].includes(inventario.fase_operacional);
+
+  if (faseTerminal) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {"\u2014"}
+      </span>
+    );
+  }
+
+  if (!inventario.analise_disponivel) {
+    let mensagem = "Dispon?vel ap?s a rodada";
+
+    if (inventario.total_localizacoes === 0) {
+      mensagem = "Aguardando escopo";
+    } else if (
+      inventario.localizacoes_pendentes > 0 ||
+      inventario.localizacoes_em_contagem > 0
+    ) {
+      mensagem = "Após concluir a contagem";
+    }
+
+    return (
+      <span className="max-w-40 whitespace-normal text-xs text-muted-foreground">
+        {mensagem}
+      </span>
+    );
+  }
+
+  if (inventario.total_divergencias === 0) {
+    return (
+      <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+        {"Sem diverg\u00eancias"}
+      </span>
+    );
+  }
+
+  return (
+    <div className="min-w-0 space-y-1 text-xs">
+      <div className="font-semibold text-destructive">
+        {inventario.total_divergencias}
+      </div>
+
+      {inventario.recontagens_pendentes > 0 && (
+        <div className="font-medium text-violet-700 dark:text-violet-300">
+          {inventario.recontagens_pendentes}{" "}
+          em recontagem
+        </div>
+      )}
+
+      {inventario.divergencias_justificadas > 0 && (
+        <div className="font-medium text-emerald-700 dark:text-emerald-300">
+          {inventario.divergencias_justificadas}{" "}
+          justificadas
+        </div>
+      )}
+
+      {inventario.pode_finalizar && (
+        <div className="font-semibold text-emerald-700 dark:text-emerald-300">
+          Pronto para finalizar
+        </div>
+      )}
+    </div>
+  );
+}
+
+function rotuloProximaAcao(acao: string) {
+  const rotulos: Record<string, string> = {
+    DEFINIR_LOCALIZACOES: "Definir escopo",
+    INICIAR_CONTAGEM: "Iniciar contagem",
+    CONTINUAR_CONTAGEM: "Continuar contagem",
+    ACOMPANHAR_RECONTAGEM: "Acompanhar recontagem",
+    GERAR_PROXIMA_RODADA: "Gerar proxima rodada",
+    ANALISAR_GESTOR: "Analisar",
+    ANALISAR_ROTATIVO: "Analisar divergências",
+    GERAR_RECONTAGEM: "Gerar recontagem",
+    FINALIZAR_INVENTARIO: "Finalizar",
+    REVISAR_RODADA: "Revisar rodada",
+    CONSULTAR_RESULTADO: "Ver resultado",
+    CONSULTAR_INVENTARIO: "Consultar",
+  };
+
+  return rotulos[acao] ?? "Abrir";
+}
+
+function AcaoInventario({
+  inventario,
+  podeExecutarContagem,
+}: {
+  inventario: InventarioResumo;
+  podeExecutarContagem: boolean;
+}) {
+  const tipoOficial = inventario.tipo === "OFICIAL";
+  const acao = inventario.proxima_acao;
+
+  if (tipoOficial && !STATUS_INVENTARIO_TERMINAIS.has(normalizarTexto(inventario.status)) &&
+      (acao === "ANALISAR_GESTOR" || estaAguardandoGestor(inventario))) {
+    return (
+      <Button asChild size="sm">
+        <Link to="/analise-gestor" search={{ inventario: inventario.id_inventario }}>
+          <ShieldCheck aria-hidden="true" />
+          Analisar
+        </Link>
+      </Button>
+    );
+  }
+
+  if (tipoOficial && (acao === "CONSULTAR_RESULTADO" || possuiResultadoFinal(inventario))) {
+    return (
+      <Button asChild size="sm" variant="outline">
+        <Link to="/analise-gestor" search={{ inventario: inventario.id_inventario }}>
+          <BarChart3 aria-hidden="true" />
+          Ver resultado
+        </Link>
+      </Button>
+    );
+  }
+
+  if (!tipoOficial && ["ANALISAR_ROTATIVO", "GERAR_RECONTAGEM", "FINALIZAR_INVENTARIO", "REVISAR_RODADA"].includes(acao)) {
+    return (
+      <Button asChild size="sm">
+        <Link to="/analise-ciclica" search={{ inventario: inventario.id_inventario }}>
+          <Eye aria-hidden="true" />
+          {rotuloProximaAcao(acao)}
+        </Link>
+      </Button>
+    );
+  }
+
+  if (tipoOficial && acao === "FINALIZAR_INVENTARIO") {
+    return (
+      <Button asChild size="sm">
+        <Link to="/analise-gestor" search={{ inventario: inventario.id_inventario }}>
+          <ShieldCheck aria-hidden="true" />
+          Finalizar
+        </Link>
+      </Button>
+    );
+  }
+
+  if (tipoOficial && acao === "REVISAR_RODADA") {
+    return (
+      <Button asChild size="sm">
+        <Link to="/analise-oficial" search={{ inventario: inventario.id_inventario }}>
+          <Eye aria-hidden="true" />
+          Revisar rodada
+        </Link>
+      </Button>
+    );
+  }
+
+  if (tipoOficial && acao === "GERAR_RECONTAGEM") {
+    return (
+      <Button asChild size="sm">
+        <Link to="/inventarios/$idInventario/controle-rodadas" params={{ idInventario: String(inventario.id_inventario) }}>
+          <Eye aria-hidden="true" />
+          Gerar recontagem
+        </Link>
+      </Button>
+    );
+  }
+
+  if (
+    inventario.proxima_acao ===
+    "ACOMPANHAR_RECONTAGEM"
+  ) {
+    return (
+      <Button asChild size="sm">
+        <Link
+          to="/recontagem"
+          search={{
+            inventario: inventario.id_inventario,
+          }}
+        >
+          <Eye aria-hidden="true" />
+          Acompanhar recontagem
+        </Link>
+      </Button>
+    );
+  }
+
+  if (
+    inventario.proxima_acao ===
+    "GERAR_PROXIMA_RODADA"
+  ) {
+    return inventario.tipo === "OFICIAL" ? (
+      <Button asChild size="sm">
+        <Link
+          to="/inventarios/$idInventario/controle-rodadas"
+          params={{
+            idInventario: String(inventario.id_inventario),
+          }}
+        >
+          <Eye aria-hidden="true" />
+          Gerar proxima rodada
+        </Link>
+      </Button>
+    ) : (
+      <Button asChild size="sm">
+        <Link
+          to="/analise-ciclica"
+          search={{ inventario: inventario.id_inventario }}
+        >
+          <Eye aria-hidden="true" />
+          Analisar divergências
+        </Link>
+      </Button>
+    );
+  }
+
+  if (
+    !podeExecutarContagem &&
+    [
+      "INICIAR_CONTAGEM",
+      "CONTINUAR_CONTAGEM",
+    ].includes(inventario.proxima_acao)
+  ) {
+    return (
+      <Button asChild size="sm">
+        <Link
+          to="/acompanhamento-contagem"
+          search={{
+            inventario: inventario.id_inventario,
+          }}
+        >
+          <Eye aria-hidden="true" />
+          Acompanhar contagem
+        </Link>
+      </Button>
+    );
+  }
+
+  if (
+    inventario.proxima_acao ===
+    "DEFINIR_LOCALIZACOES"
+  ) {
+    return (
+      <Button asChild size="sm">
+        <Link
+          to="/inventarios/$idInventario/estoque-escopo"
+          params={{
+            idInventario: String(
+              inventario.id_inventario,
+            ),
+          }}
+        >
+          <ClipboardList aria-hidden="true" />
+          Definir escopo
+        </Link>
+      </Button>
+    );
+  }
+
+  if (!tipoOficial && acao === "CONSULTAR_RESULTADO") {
+    return (
+      <Button asChild size="sm" variant="outline">
+        <Link to="/historico" search={{ inventario: inventario.id_inventario, aba: "visao-geral" }}>
+          <BarChart3 aria-hidden="true" />
+          Ver resultado
+        </Link>
+      </Button>
+    );
+  }
+
+  return (
+    <Button asChild size="sm" variant="outline">
+      <Link
+        to="/inventarios/$idInventario"
+        params={{
+          idInventario: String(
+            inventario.id_inventario,
+          ),
+        }}
+      >
+        <Eye aria-hidden="true" />
+        {rotuloProximaAcao(
+          inventario.proxima_acao,
+        )}
+      </Link>
+    </Button>
+  );
+}
+
+function gerarProximoCodigoInventario(inventarios: InventarioResumo[]) {
+  const ano = new Date().getFullYear();
+  const prefixo = `INV-${ano}-`;
+  let maiorSequencia = 0;
+
+  for (const inventario of inventarios) {
+    if (!inventario.codigo_inventario.startsWith(prefixo)) {
+      continue;
+    }
+
+    const sequencia = Number(
+      inventario.codigo_inventario.slice(prefixo.length),
+    );
+
+    if (Number.isInteger(sequencia) && sequencia > maiorSequencia) {
+      maiorSequencia = sequencia;
+    }
+  }
+
+  return `${prefixo}${String(maiorSequencia + 1).padStart(3, "0")}`;
+}
+
+function Campo({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="space-y-1.5">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Resumo({
+  titulo,
+  valor,
+  destaque = false,
+  ativo = false,
+  onClick,
+}: {
+  titulo: string;
+  valor: number;
+  destaque?: boolean;
+  ativo?: boolean;
+  onClick?: () => void;
+}) {
+  const classeCard = [
+    "w-full rounded-lg border p-4 text-left shadow-xs transition-all",
+
+    ativo
+      ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+      : destaque
+        ? "border-amber-400 bg-amber-50/60 dark:bg-amber-950/20"
+        : "border-border bg-card",
+
+    onClick
+      ? "cursor-pointer hover:-translate-y-0.5 hover:border-primary/70 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const classeTitulo = ativo
+    ? "text-sm font-medium text-primary"
+    : destaque
+      ? "text-sm text-amber-700 dark:text-amber-300"
+      : "text-sm text-muted-foreground";
+
+  const classeValor = ativo
+    ? "text-primary"
+    : destaque
+      ? "text-amber-700 dark:text-amber-300"
+      : "text-primary";
+
+  const conteudo = (
+    <>
+      <div className={classeTitulo}>
+        {titulo}
+      </div>
+
+      <div
+        className={`mt-1 text-2xl font-bold ${classeValor}`}
+      >
+        {valor}
+      </div>
+
+      {onClick && (
+        <div className="mt-2 text-xs text-muted-foreground">
+          {ativo ? "Filtro aplicado" : "Clique para filtrar"}
+        </div>
+      )}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={classeCard}
+        onClick={onClick}
+        aria-pressed={ativo}
+      >
+        {conteudo}
+      </button>
+    );
+  }
+
+  return (
+    <div className={classeCard}>
+      {conteudo}
+    </div>
+  );
+}
+
+function Th({ children }: { children: ReactNode }) {
+  return (
+    <th className="whitespace-normal break-words px-2 py-3 font-medium leading-tight text-muted-foreground">
+      {children}
+    </th>
+  );
+}
+
+function Td({ children }: { children: ReactNode }) {
+  return (
+    <td className="min-w-0 whitespace-normal break-words px-2 py-3 align-middle">
+      {children}
+    </td>
+  );
+}
+
+function TipoBadge({ tipo }: { tipo: TipoInventario }) {
+  return (
+    <span className="inline-flex rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium">
+      {tipo === "ROTATIVO" ? "Rotativo" : "Oficial"}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalizado = status.toUpperCase();
+
+  let classe = "border-border bg-muted text-muted-foreground";
+
+  if (normalizado === "ABERTO") {
+    classe = "border-emerald-200 bg-emerald-50 text-emerald-700";
+  } else if (normalizado === "FINALIZADO" || normalizado === "ENCERRADO") {
+    classe = "border-slate-200 bg-slate-100 text-slate-700";
+  }
+
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${classe}`}
+    >
+      {formatarStatus(status)}
+    </span>
+  );
+}
+
+function GestorBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+      <ShieldCheck className="size-3.5" aria-hidden="true" />
+      Aguardando gestor
+    </span>
+  );
+}
+
+function ResultadoBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+      <BarChart3 className="size-3.5" aria-hidden="true" />
+      Resultado disponível
+    </span>
+  );
+}
+
+function formatarStatus(status: string) {
+  return status
+    .replaceAll("_", " ")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/(^|\s)\S/g, (letra) => letra.toLocaleUpperCase("pt-BR"));
+}
+
+function formatarData(valor: string | null) {
+  if (!valor) return "-";
+
+  const data = new Date(valor);
+
+  if (Number.isNaN(data.getTime())) {
+    return valor;
+  }
+
+  return data.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

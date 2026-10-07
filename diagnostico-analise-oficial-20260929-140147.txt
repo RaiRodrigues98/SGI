@@ -1,0 +1,62 @@
+==========================================================================================
+DIAGNOSTICO READ-ONLY - ANALISE OFICIAL SGI
+==========================================================================================
+
+===== 1. CONFIGURACAO DO BANCO =====
+DB_SERVER  = 27.78.101.4,1433
+DB_DATABASE= Inventario
+USUARIO    = CONFIGURADO
+SENHA      = CONFIGURADA
+[PASS] Conexao read-only aberta.
+
+===== 2. INVENTARIOS OFICIAIS ABERTOS =====
+ID=1655 | CODIGO=INV-2026-021 | RODADA_ATUAL=2 | STATUS=ABERTO
+
+==========================================================================================
+INVENTARIO 1655 | INV-2026-021 | RODADA 2
+==========================================================================================
+
+===== RODADA =====
+ID_Rodada=2193 | Numero=2 | Status=FINALIZADA
+
+===== SNAPSHOT =====
+Linhas=19 | Chaves Codigo+Lote=19 | Quantidade=33.0000
+
+===== CONTAGENS DA RODADA =====
+Linhas=18 | Chaves Codigo+Lote=17 | Quantidade=32.000
+
+===== CONCILIACAO CODIGO + LOTE =====
+Chaves contadas=17 | Encontradas no snapshot=16 | Sem correspondencia=1
+
+===== CONTAGENS SEM CORRESPONDENCIA NO SNAPSHOT =====
+Codigo='R0100400102' | Lote='3007855959 - 10' | Contado=2.000 | Mesmo codigo no snapshot=0
+
+===== LOTES DO SNAPSHOT PARA OS CODIGOS CONTADOS =====
+Codigo='70238126' | Lote='RETN' | Estoque=4.0000 | Descricao='PMD78B-5K190/101, PMD78B-AABADJHB7FJBHAJAAAFJAA0G4DF2Q1'
+Codigo='70238588' | Lote='RETN' | Estoque=1.0000 | Descricao='CYH112-1JX0/0, CYH112-AA11D50B1KA'
+Codigo='70240998' | Lote='RETN' | Estoque=4.0000 | Descricao='DK5019-1N80/0, DK5019-DAD10DGBA 100,00m'
+Codigo='71111156' | Lote='3007855932 - 20' | Estoque=1.0000 | Descricao=', Bottle tray + 24x 1 liter PE'
+Codigo='71111156' | Lote='3007855949 - 20' | Estoque=1.0000 | Descricao=', Bottle tray + 24x 1 liter PE'
+Codigo='71111156' | Lote='3007855959 - 20' | Estoque=1.0000 | Descricao=', Bottle tray + 24x 1 liter PE'
+Codigo='71111156' | Lote='3007855976 - 20' | Estoque=1.0000 | Descricao=', Bottle tray + 24x 1 liter PE'
+Codigo='71266038' | Lote='3007864323 - 180' | Estoque=2.0000 | Descricao='Liquipoint FTW23'
+Codigo='71430055' | Lote='3007863867 - 600' | Estoque=1.0000 | Descricao='"t-mass I 300, 6I3BL1, 235mm 9"""'
+Codigo='71430057' | Lote='3007863867 - 410' | Estoque=3.0000 | Descricao='"t-mass I 300, 6I3BL3, 435mm 17"""'
+Codigo='71460183' | Lote='3007864367 - 40' | Estoque=1.0000 | Descricao='Liquiphant FTL62'
+Codigo='71572027' | Lote='3007855932 - 10' | Estoque=1.0000 | Descricao=', Kit de manutenção do colector de amostra'
+Codigo='71572027' | Lote='3007855949 - 10' | Estoque=1.0000 | Descricao=', Kit de manutenção do colector de amostra'
+Codigo='71572027' | Lote='3007855959 - 10' | Estoque=1.0000 | Descricao=', Kit de manutenção do colector de amostra'
+Codigo='71572027' | Lote='3007855976 - 10' | Estoque=1.0000 | Descricao=', Kit de manutenção do colector de amostra'
+Codigo='71613674' | Lote='3007864323 - 170' | Estoque=3.0000 | Descricao=', Micropilot FMR10B'
+Codigo='71769495' | Lote='RETN' | Estoque=1.0000 | Descricao='71769495, 8S5B50-AAIBADAAGAABLASBSAWAA1+AGDC'
+
+===== LOCALIZACOES DA RODADA =====
+[ATENCAO] Nenhuma localizacao encontrada para a rodada.
+
+===== SESSOES DA RODADA =====
+Status=ENCERRADA | Quantidade=6
+
+==========================================================================================
+FIM DO DIAGNOSTICO
+Nenhuma escrita foi executada.
+==========================================================================================
