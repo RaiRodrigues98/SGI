@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "frontend": {
-      "root": "frontend/",
+      "root": "frontend",
       "framework": "tanstack-start",
       "bindings": [
         {
@@ -24,27 +24,13 @@
       "source": "/api",
       "destination": {
         "service": "backend"
-      },
-      "transforms": [
-        {
-          "type": "request.path",
-          "op": "set",
-          "args": "/"
-        }
-      ]
+      }
     },
     {
-      "source": "/api/:path*",
+      "source": "/api/(.*)",
       "destination": {
         "service": "backend"
-      },
-      "transforms": [
-        {
-          "type": "request.path",
-          "op": "set",
-          "args": "/:path*"
-        }
-      ]
+      }
     },
     {
       "source": "/(.*)",

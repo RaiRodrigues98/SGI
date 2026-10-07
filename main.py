@@ -45,13 +45,104 @@ from routers.rotativo_priorizacao import router as rotativo_priorizacao
 from routers.auditoria import router as auditoria_router
 from routers.planos_acao import router as planos_acao_router
 from routers.notificacoes import router as notificacoes_router
+
+
 # ============================================================
-# APLICAÃ‡ÃƒO
+# MIDDLEWARE - COMPATIBILIDADE VERCEL / DOCKER
+# ============================================================
+
+
+class StripApiPrefixMiddleware:
+    """
+    Compatibilidade entre os dois ambientes do SGI.
+
+    Docker / Nginx:
+        /api/auth/login
+            ↓
+        Nginx remove /api
+            ↓
+        FastAPI recebe /auth/login
+
+    Vercel Services:
+        /api/auth/login
+            ↓
+        FastAPI recebe /api/auth/login
+
+    Quando o prefixo /api estiver presente, este middleware
+    remove apenas esse prefixo antes do roteamento do FastAPI.
+
+    As rotas sem /api continuam funcionando normalmente.
+    """
+
+    def __init__(
+        self,
+        app,
+        prefix: str = "/api",
+    ):
+        self.app = app
+        self.prefix = prefix
+
+    async def __call__(
+        self,
+        scope,
+        receive,
+        send,
+    ):
+        if scope["type"] in {
+            "http",
+            "websocket",
+        }:
+            path = scope.get(
+                "path",
+                "",
+            )
+
+            # /api -> /
+            if path == self.prefix:
+                scope = dict(scope)
+
+                scope["path"] = "/"
+                scope["raw_path"] = b"/"
+
+            # /api/auth/login -> /auth/login
+            elif path.startswith(
+                self.prefix + "/"
+            ):
+                novo_path = path[
+                    len(self.prefix):
+                ]
+
+                scope = dict(scope)
+
+                scope["path"] = novo_path
+                scope["raw_path"] = novo_path.encode(
+                    "utf-8"
+                )
+
+        await self.app(
+            scope,
+            receive,
+            send,
+        )
+
+
+# ============================================================
+# APLICAÇÃO
 # ============================================================
 
 app = FastAPI(
     title="SGI - Alzarsilog",
-    version="0.3.0"
+    version="0.3.0",
+)
+
+
+# ============================================================
+# MIDDLEWARE DE PREFIXO /api
+# ============================================================
+
+app.add_middleware(
+    StripApiPrefixMiddleware,
+    prefix="/api",
 )
 
 
@@ -141,15 +232,19 @@ app.include_router(
 app.include_router(
     indicadores_router
 )
+
 app.include_router(
     historico_router
 )
+
 app.include_router(
     risco_router
 )
+
 app.include_router(
     rotativo_ciclos_router
 )
+
 app.include_router(
     rotativo_cobertura_router
 )
@@ -157,14 +252,19 @@ app.include_router(
 app.include_router(
     rotativo_fluxo_router
 )
+
 app.include_router(
     rotativo_consulta_router
 )
-app.include_router(rotativo_priorizacao)
+
+app.include_router(
+    rotativo_priorizacao
+)
 
 app.include_router(
     auditoria_router
 )
+
 app.include_router(
     planos_acao_router,
     include_in_schema=False,
@@ -173,4 +273,3 @@ app.include_router(
 app.include_router(
     notificacoes_router
 )
-
